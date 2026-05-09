@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>KaonCheck - Filipino Diet Advisor</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <h1>KaonCheck</h1>
+    <p>A Filipino Dietary & Health Advisory</p>
+  </header>
+
+  <div class="card" id="mainCard">
+    <div class="upload-zone" id="uploadZone">
+      <div class="upload-icon">📷</div>
+      <p>Tap to upload or take a photo of your meal</p>
+      <input type="file" id="fileInput" accept="image/*" style="display:none"/>
+    </div>
+
+    <div class="preview-container" id="previewContainer">
+      <img id="preview" alt="Food Preview"/>
+      <div class="scanning-laser" id="scanningLaser"></div>
+      <div class="scanning-overlay" id="scanningOverlay"></div>
+      <div id="boundingBoxContainer"></div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn-primary" id="analyzeBtn" disabled>
+        Analyze Dish
+      </button>
+      <button class="btn-secondary" id="cameraBtn">
+        Camera
+      </button>
+    </div>
+  </div>
+
+  <div id="results">
+    <!-- Results injected here by app.js -->
+  </div>
+</div>
+
+<!-- Camera Modal -->
+<div class="modal" id="cameraModal">
+  <div class="modal-inner ar-mode">
+    <div class="camera-header">
+      <h3>AR Live Scanner</h3>
+      <button class="close-icon-btn" id="closeCamera">✕</button>
+    </div>
+    
+    <div class="camera-wrapper">
+      <video id="cameraFeed" autoplay playsinline></video>
+      <div class="scanning-laser" id="liveScanningLaser" style="display:none;"></div>
+      <div class="scanning-overlay" id="liveScanningOverlay" style="display:none;"></div>
+      <div id="liveBoundingBoxContainer"></div>
+      <div id="liveArOverlayContainer"></div>
+    </div>
+
+    <canvas id="snapshot" style="display:none"></canvas>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

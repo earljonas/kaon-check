@@ -1,4 +1,6 @@
 from fastapi import FastAPI, File, UploadFile
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from ultralytics import YOLO
 from nlp import get_health_advisory
@@ -35,10 +37,12 @@ async def analyze(file: UploadFile = File(...)):
                 continue
             seen.add(dish_name)
             confidence = float(box.conf[0])
+            bbox = box.xyxyn[0].tolist()
             advisory = get_health_advisory(dish_name)
             detections.append({
                 "dish": dish_name,
                 "confidence": round(confidence * 100, 1),
+                "bbox": bbox,
                 "advisory": advisory
             })
 
@@ -46,3 +50,9 @@ async def analyze(file: UploadFile = File(...)):
         return {"message": "No dish detected", "detections": []}
 
     return {"detections": detections}
+
+app.mount("/static", StaticFiles(directory="."), name="static")
+
+@app.get("/")
+async def read_index():
+    return FileResponse('index.html')
