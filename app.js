@@ -1,10 +1,18 @@
 document.addEventListener('DOMContentLoaded', () => {
+  const workspace = document.querySelector('.workspace');
   const uploadZone = document.getElementById('uploadZone');
   const fileInput = document.getElementById('fileInput');
   const preview = document.getElementById('preview');
   const previewContainer = document.getElementById('previewContainer');
+  const scannerCard = document.querySelector('.scanner-card');
+  const scanTitle = document.getElementById('scanTitle');
+  const scanSubtitle = document.getElementById('scanSubtitle');
+  const imageDetectionPill = document.getElementById('imageDetectionPill');
+  const uploadBtn = document.getElementById('uploadBtn');
   const analyzeBtn = document.getElementById('analyzeBtn');
   const cameraBtn = document.getElementById('cameraBtn');
+  const newScanBtn = document.getElementById('newScanBtn');
+  const rightColumn = document.querySelector('.right-column');
   const resultsDiv = document.getElementById('results');
   const boundingBoxContainer = document.getElementById('boundingBoxContainer');
   const scanningLaser = document.getElementById('scanningLaser');
@@ -23,25 +31,40 @@ document.addEventListener('DOMContentLoaded', () => {
   const liveBoundingBoxContainer = document.getElementById('liveBoundingBoxContainer');
   const liveArOverlayContainer = document.getElementById('liveArOverlayContainer');
 
+  // Full Yobab chat modal elements. The modal uses the same in-memory
+  // messages array as the compact Ask Yobab card.
+  const nutriChatModal = document.getElementById('nutriChatModal');
+  const closeNutriChat = document.getElementById('closeNutriChat');
+  const nutriChatMessages = document.getElementById('nutriChatMessages');
+  const modalFollowUps = document.getElementById('modalFollowUps');
+  const nutriChatForm = document.getElementById('nutriChatForm');
+  const nutriChatInput = document.getElementById('nutriChatInput');
+
   let currentFile = null;
   let stream = null;
   let scanInterval = null;
   let isScanning = false;
   let liveScanFailures = 0;
   let currentLiveDish = '';
-  const chatHistories = new Map();
-  let ttsSpeech = new SpeechSynthesisUtterance();
-  let isSpeaking = false;
-  let availableVoices = [];
+  let mealContext = null;
+
+  // Conversation memory for the current browser session only.
+  // No database and no localStorage yet.
+  let messages = [
+    { role: 'assistant', content: 'Ask me about this meal.' }
+  ];
 
   const apiBaseUrl = window.location.port === '8000' ? '' : 'http://127.0.0.1:8000';
 
-  // Browsers load voices asynchronously, so we must wait for them to load
-  window.speechSynthesis.onvoiceschanged = () => {
-    availableVoices = window.speechSynthesis.getVoices();
-  };
-
   uploadZone.addEventListener('click', () => fileInput.click());
+  uploadBtn.addEventListener('click', () => fileInput.click());
+  newScanBtn.addEventListener('click', resetApp);
+  uploadZone.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      fileInput.click();
+    }
+  });
 
   fileInput.addEventListener('change', (e) => {
     const file = e.target.files[0];
@@ -49,11 +72,25 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   function resetApp() {
-    window.speechSynthesis.cancel();
-    uploadZone.style.display = 'block';
-    previewContainer.style.display = 'none';
-    resultsDiv.style.display = 'none';
+    window.speechSynthesis?.cancel();
+    uploadZone.style.display = '';
+    previewContainer.style.display = '';
+    workspace.classList.add('no-results');
+    scannerCard.classList.remove('has-image', 'has-result');
+    scanTitle.textContent = 'Check your Filipino meal in seconds.';
+    scanSubtitle.textContent = 'Upload a photo or open your camera to scan your ulam.';
+    imageDetectionPill.textContent = 'AI detected your ulam';
+    uploadBtn.classList.remove('is-hidden');
+    cameraBtn.classList.remove('is-hidden');
+    analyzeBtn.classList.add('is-hidden');
+    newScanBtn.classList.add('is-hidden');
+    resultsDiv.classList.remove('is-visible');
+    rightColumn.classList.remove('has-results');
+    resultsDiv.innerHTML = '';
+    fileInput.value = '';
     currentFile = null;
+    mealContext = null;
+    resetNutriMemory();
     analyzeBtn.disabled = true;
   }
 
@@ -64,13 +101,25 @@ document.addEventListener('DOMContentLoaded', () => {
     
     uploadZone.style.display = 'none';
     previewContainer.style.display = 'block';
+    scannerCard.classList.add('has-image');
+    scannerCard.classList.remove('has-result');
+    workspace.classList.add('no-results');
+    scanTitle.textContent = 'Scanned dish';
+    scanSubtitle.textContent = 'Review the photo, then analyze the dish.';
+    imageDetectionPill.textContent = 'Ready to analyze';
+    uploadBtn.classList.add('is-hidden');
+    cameraBtn.classList.add('is-hidden');
+    analyzeBtn.classList.remove('is-hidden');
+    newScanBtn.classList.remove('is-hidden');
     
     analyzeBtn.disabled = false;
-    resultsDiv.style.display = 'none';
+    resultsDiv.classList.remove('is-visible');
+    rightColumn.classList.remove('has-results');
     resultsDiv.innerHTML = '';
     boundingBoxContainer.innerHTML = '';
-    window.speechSynthesis.cancel();
-    isSpeaking = false;
+    mealContext = null;
+    resetNutriMemory();
+    window.speechSynthesis?.cancel();
   }
 
   function setCameraStatus(message, isError = false) {
@@ -135,6 +184,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       cameraBtn.disabled = true;
       cameraModal.classList.add('open');
+      cameraModal.setAttribute('aria-hidden', 'false');
       setCameraStatus('Starting camera...');
 
       stream = await openCameraStream();
@@ -246,17 +296,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const scoreText = advisory['Health Score'] || '5/10';
     const scoreNum = parseInt(scoreText);
     
-    let scoreColor = 'var(--score-poor)';
+    let scoreColor = '#bf3f32';
     let scoreDesc = 'High Risk';
-    if (scoreNum >= 7) { scoreColor = 'var(--score-excellent)'; scoreDesc = 'Healthy Choice'; }
-    else if (scoreNum >= 4) { scoreColor = 'var(--score-moderate)'; scoreDesc = 'Moderate'; }
+    if (scoreNum >= 7) { scoreColor = '#1f7a4f'; scoreDesc = 'Healthy Choice'; }
+    else if (scoreNum >= 4) { scoreColor = '#c87913'; scoreDesc = 'Moderate'; }
 
     const card = document.createElement('div');
     card.className = 'ar-floating-card';
     card.innerHTML = `
       <div class="ar-dish-header">
         <div>
-          <span class="ar-kicker">Nutri scan</span>
+          <span class="ar-kicker">Yobab scan</span>
           <h4>${det.dish}</h4>
         </div>
         <span class="ar-confidence">${det.confidence}%</span>
@@ -285,26 +335,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function getFollowUpQuestions(dish) {
     return [
-      `Is ${dish} okay if I have hypertension?`,
-      `What is a healthier version of ${dish}?`,
-      `How often can I eat this?`,
+      'Can I eat this often?',
+      'What if I have diabetes?',
+      'What if I have hypertension?',
       `What should I pair this with?`
     ];
-  }
-
-  function getChatHistory(dish) {
-    if (!chatHistories.has(dish)) {
-      chatHistories.set(dish, []);
-    }
-    return chatHistories.get(dish);
-  }
-
-  function addChatHistory(dish, role, content) {
-    const history = getChatHistory(dish);
-    history.push({ role, content });
-    if (history.length > 10) {
-      history.splice(0, history.length - 10);
-    }
   }
 
   function wait(ms) {
@@ -324,10 +359,10 @@ document.addEventListener('DOMContentLoaded', () => {
     target.textContent = '';
     target.classList.add('is-streaming');
     if (thinkingTarget) {
-      thinkingTarget.textContent = question ? `Nutri is thinking about ${dish}...` : `Analyzing nutritional content of ${dish}...`;
+      thinkingTarget.textContent = question ? `Yobab is thinking about ${dish}...` : `Analyzing nutritional content of ${dish}...`;
       thinkingTarget.style.display = 'block';
     } else {
-      target.textContent = question ? `Nutri is thinking about ${dish}...` : `Analyzing nutritional content of ${dish}...`;
+      target.textContent = question ? `Yobab is thinking about ${dish}...` : `Analyzing nutritional content of ${dish}...`;
     }
 
     const formData = new FormData();
@@ -357,11 +392,14 @@ document.addEventListener('DOMContentLoaded', () => {
         target.scrollTop = target.scrollHeight;
       }
     } catch (err) {
-      console.error('Nutri stream error:', err);
+      console.error('Yobab stream error:', err);
       if (thinkingTarget) thinkingTarget.style.display = 'none';
-      target.textContent = `Nutri could not stream right now, but ${dish} is best handled with a balanced portion, vegetables, and water.`;
+      target.textContent = `Yobab could not stream right now, but ${dish} is best handled with a modest portion, gulay or sabaw, and water. Avoid extra gravy or salty sawsawan.`;
     } finally {
       target.classList.remove('is-streaming');
+      if (question) {
+        target.textContent = limitSentences(target.textContent, 4);
+      }
       if (followUpContainer && !question) {
         renderFollowUps(followUpContainer, dish);
       }
@@ -370,39 +408,46 @@ document.addEventListener('DOMContentLoaded', () => {
     return target.textContent.trim();
   }
 
+  function limitSentences(text, maxSentences = 4) {
+    const sentences = text.match(/[^.!?]+[.!?]+|\S[^.!?]*$/g);
+    if (!sentences || sentences.length <= maxSentences) return text;
+    return sentences.slice(0, maxSentences).join(' ').trim();
+  }
+
   async function sendChatMessage(card, dish, question) {
     const message = question.trim();
     if (!message || card.dataset.streaming === 'true') return;
 
     const input = card.querySelector('.chat-input');
     const sendButton = card.querySelector('.chat-send');
-    const conversation = card.querySelector('.ai-conversation');
     const followUps = card.querySelector('.follow-up-row');
-    const historySnapshot = [...getChatHistory(dish)];
+    const answerPreview = card.querySelector('.answer-preview');
+    const answerCopy = card.querySelector('.answer-copy');
 
     card.dataset.streaming = 'true';
     if (input) input.disabled = true;
     if (sendButton) sendButton.disabled = true;
 
-    const userBubble = document.createElement('div');
-    userBubble.className = 'chat-bubble user';
-    userBubble.textContent = message;
-    conversation.appendChild(userBubble);
-
-    const thinking = document.createElement('div');
-    thinking.className = 'ai-thinking';
-    thinking.textContent = `Nutri is thinking about ${dish}...`;
-    conversation.appendChild(thinking);
-
-    const replyBubble = document.createElement('div');
-    replyBubble.className = 'chat-bubble assistant';
-    conversation.appendChild(replyBubble);
+    answerPreview.classList.remove('is-hidden');
+    answerCopy.textContent = 'Yobab is thinking...';
+    answerCopy.classList.add('is-streaming');
     if (followUps) followUps.innerHTML = '';
 
-    const answer = await streamNutriText(replyBubble, dish, message, null, thinking, historySnapshot);
-    addChatHistory(dish, 'user', message);
-    if (answer) addChatHistory(dish, 'assistant', answer);
+    await sendNutriMessage(message, {
+      onStart: () => {
+        answerCopy.textContent = '';
+      },
+      onToken: async (chunk) => {
+        await typeText(answerCopy, chunk);
+      },
+      onDone: (finalAnswer) => {
+        answerCopy.classList.remove('is-streaming');
+        answerCopy.textContent = finalAnswer;
+      }
+    });
+
     renderFollowUps(followUps, dish);
+    renderChatMessages();
 
     card.dataset.streaming = 'false';
     if (input) {
@@ -411,7 +456,174 @@ document.addEventListener('DOMContentLoaded', () => {
       input.focus();
     }
     if (sendButton) sendButton.disabled = false;
-    conversation.scrollTop = conversation.scrollHeight;
+  }
+
+  // Main streaming sender for both compact Ask Yobab and the full modal.
+  // It keeps memory in the messages array while using the backend stream when available.
+  async function sendNutriMessage(userMessage, hooks = {}) {
+    const historyBeforeUserMessage = [...messages];
+    messages.push({ role: 'user', content: userMessage });
+    hooks.onThinking?.();
+    await wait(120);
+
+    let answer = '';
+    let hasStartedStreaming = false;
+
+    try {
+      const formData = new FormData();
+      formData.append('dish', mealContext?.foodName || 'Fried Chicken');
+      formData.append('question', userMessage);
+      formData.append('history', JSON.stringify(historyBeforeUserMessage));
+
+      const res = await fetch(`${apiBaseUrl}/advisor/stream`, { method: 'POST', body: formData });
+      if (!res.ok || !res.body) throw new Error(`Advisor stream failed: ${res.status}`);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        if (!chunk) continue;
+        if (!hasStartedStreaming) {
+          hasStartedStreaming = true;
+          hooks.onStart?.();
+        }
+        answer += chunk;
+        await hooks.onToken?.(chunk, answer);
+      }
+    } catch (error) {
+      console.error('Yobab stream failed, using local fallback:', error);
+      answer = getNutriReply(userMessage, historyBeforeUserMessage, mealContext);
+      hooks.onStart?.();
+      await hooks.onToken?.(answer, answer);
+    }
+
+    answer = limitSentences(answer.trim(), 5);
+    messages.push({ role: 'assistant', content: answer });
+    hooks.onDone?.(answer);
+    return answer;
+  }
+
+  // Placeholder Yobab brain. Replace this later with a real API call if needed.
+  // It receives the latest user message, full conversation memory, and meal context.
+  function getNutriReply(userMessage, messages, mealContext) {
+    const normalized = userMessage.toLowerCase();
+    const dish = mealContext?.foodName || 'Fried Chicken';
+
+    if (!isNutritionQuestion(normalized) && !isMealFollowUp(normalized, messages)) {
+      return 'I’m here for ulam and nutrition questions only. Ask me about Fried Chicken, portions, rice, sodium, diabetes, hypertension, or healthier swaps.';
+    }
+
+    if (isMealFollowUp(normalized, messages) && (
+      normalized === 'why' ||
+      normalized === 'why?' ||
+      normalized.includes('how come') ||
+      normalized.includes('explain') ||
+      normalized.includes('what do you mean') ||
+      normalized.includes('are you sure') ||
+      normalized === 'sure' ||
+      normalized.includes('really') ||
+      normalized.includes('is that true') ||
+      normalized.includes('confirm')
+    )) {
+      return `Yes, I’m sure about the general guidance. ${dish} tends to be heavier because of oil, sodium, and fried coating, so gulay, sabaw, water, and moderate kanin help balance the meal. It is not a ban, just a smarter plate setup.`;
+    }
+
+    if (normalized.includes('skin') || normalized.includes('remove')) {
+      return `Removing the skin helps reduce some oil and calories from ${dish}. Still bantayan the portion, because fried coating and sodium can still add up. Pair it with gulay or sabaw and keep the kanin reasonable.`;
+    }
+
+    if (normalized.includes('diabetes') || normalized.includes('blood sugar')) {
+      return `${dish} can fit sometimes, but watch the kanin more closely. Keep rice reasonable, add gulay or sabaw, and skip sweet drinks. Tiny plate math, big difference.`;
+    }
+
+    if (normalized.includes('hypertension') || normalized.includes('blood pressure') || normalized.includes('sodium') || normalized.includes('salt')) {
+      return `${dish} can be salty, especially with gravy or sawsawan. Keep the portion modest, choose water, and pair it with gulay or sabaw. Your blood pressure does not need extra drama.`;
+    }
+
+    if (normalized.includes('pair') || normalized.includes('with') || normalized.includes('rice') || normalized.includes('kanin')) {
+      return `Pair ${dish} with gulay or sabaw, water, and around 1 cup of rice. Go easy on gravy and salty sawsawan. Balanced plate, less food coma.`;
+    }
+
+    if (normalized.includes('often') || normalized.includes('everyday') || normalized.includes('every day') || normalized.includes('daily') || normalized.includes('araw')) {
+      return `${dish} is fine occasionally, but not pang-araw-araw. The main things to bantayan are oil, sodium, and portion size. Pair it with gulay or sabaw, keep rice reasonable, and skip extra gravy or salty sawsawan.`;
+    }
+
+    if (normalized.includes('swap') || normalized.includes('healthier') || normalized.includes('better')) {
+      return `A better choice would be inihaw, tinola, air-fried, or less oily manok. Keep the flavor, reduce the oil and sodium, and add gulay on the side. Still masarap, just less heavy.`;
+    }
+
+    return `${dish} is fine occasionally, but not pang-araw-araw. Watch oil, sodium, and portion size. Pair it with gulay or sabaw, keep rice reasonable, and skip extra gravy or salty sawsawan.`;
+  }
+
+  function isNutritionQuestion(text) {
+    return [
+      'ulam',
+      'nutrition',
+      'nutri',
+      'yobab',
+      'portion',
+      'rice',
+      'kanin',
+      'sodium',
+      'salt',
+      'diabetes',
+      'hypertension',
+      'blood pressure',
+      'blood sugar',
+      'health',
+      'healthy',
+      'healthier',
+      'swap',
+      'often',
+      'daily',
+      'everyday',
+      'araw',
+      'pair',
+      'gulay',
+      'sabaw',
+      'gravy',
+      'sawsawan',
+      'oil',
+      'fried',
+      'eat'
+    ].some((keyword) => text.includes(keyword));
+  }
+
+  function isMealFollowUp(text, history = messages) {
+    const compact = text.trim().replace(/\s+/g, ' ');
+    const followUps = [
+      'why',
+      'why?',
+      'why not',
+      'how come',
+      'what do you mean',
+      'explain',
+      'explain more',
+      'what about rice',
+      'what about gravy',
+      'what about removing the skin',
+      'is that bad',
+      'can i eat more',
+      'how often',
+      'what if every day',
+      'why 1 cup',
+      'why avoid sawsawan',
+      'are you sure',
+      'sure',
+      'really',
+      'is that true',
+      'can you confirm',
+      'confirm'
+    ];
+    const hasAssistantMealContext = history.some((message) => (
+      message.role === 'assistant' &&
+      /(meal|ulam|rice|kanin|gulay|sabaw|sodium|portion|fried|gravy|sawsawan|chicken)/i.test(message.content)
+    ));
+
+    return hasAssistantMealContext && followUps.some((term) => compact.includes(term));
   }
 
   function attachChatComposer(card, dish) {
@@ -434,12 +646,95 @@ document.addEventListener('DOMContentLoaded', () => {
       button.className = 'follow-up-chip';
       button.textContent = question;
       button.addEventListener('click', async () => {
-        const card = button.closest('.ai-advisor-card');
-        await sendChatMessage(card, dish, question);
+        const card = button.closest('.ask-card');
+        if (card) {
+          await sendChatMessage(card, dish, question);
+          return;
+        }
+
+        await sendFullChatQuestion(question);
       });
       container.appendChild(button);
     });
   }
+
+  function resetNutriMemory() {
+    messages = [
+      { role: 'assistant', content: 'Ask me about this meal.' }
+    ];
+    renderChatMessages();
+  }
+
+  function openFullNutriChat() {
+    if (!mealContext) return;
+    nutriChatModal.classList.add('open');
+    nutriChatModal.setAttribute('aria-hidden', 'false');
+    renderFollowUps(modalFollowUps, mealContext.foodName);
+    renderChatMessages();
+    nutriChatInput.focus();
+  }
+
+  function closeFullNutriChat() {
+    nutriChatModal.classList.remove('open');
+    nutriChatModal.setAttribute('aria-hidden', 'true');
+  }
+
+  // Renders the full conversation memory in the modal.
+  function renderChatMessages(draft = '') {
+    if (!nutriChatMessages) return;
+    nutriChatMessages.innerHTML = '';
+
+    messages.forEach((message) => {
+      const bubble = document.createElement('div');
+      bubble.className = `nutri-message ${message.role}`;
+      bubble.textContent = message.content;
+      nutriChatMessages.appendChild(bubble);
+    });
+
+    if (draft) {
+      const bubble = document.createElement('div');
+      bubble.className = 'nutri-message assistant is-streaming';
+      bubble.textContent = draft;
+      nutriChatMessages.appendChild(bubble);
+    }
+
+    nutriChatMessages.scrollTop = nutriChatMessages.scrollHeight;
+  }
+
+  async function sendFullChatQuestion(question) {
+    const message = question.trim();
+    if (!message || !mealContext) return;
+
+    nutriChatInput.disabled = true;
+    const submitButton = nutriChatForm.querySelector('button');
+    submitButton.disabled = true;
+
+    await sendNutriMessage(message, {
+      onThinking: () => renderChatMessages('Yobab is thinking...'),
+      onStart: () => renderChatMessages(''),
+      onToken: async (_chunk, draft) => renderChatMessages(draft),
+      onDone: () => renderChatMessages()
+    });
+    renderFollowUps(modalFollowUps, mealContext.foodName);
+
+    nutriChatInput.value = '';
+    nutriChatInput.disabled = false;
+    submitButton.disabled = false;
+    nutriChatInput.focus();
+  }
+
+  closeNutriChat.addEventListener('click', closeFullNutriChat);
+
+  nutriChatModal.addEventListener('click', (event) => {
+    if (event.target === nutriChatModal) {
+      closeFullNutriChat();
+    }
+  });
+
+  nutriChatForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    await sendFullChatQuestion(nutriChatInput.value);
+  });
 
   closeCamera.addEventListener('click', stopCamera);
 
@@ -461,6 +756,59 @@ document.addEventListener('DOMContentLoaded', () => {
     cameraFeed.pause();
     cameraFeed.srcObject = null;
     cameraModal.classList.remove('open');
+    cameraModal.setAttribute('aria-hidden', 'true');
+  }
+
+  function cleanFoodName(label = '') {
+    const normalized = label
+      .replace(/\s+/g, ' ')
+      .replace(/\s*-\s*/g, ' - ')
+      .trim();
+
+    const betweenDashes = normalized.match(/-\s*([^-]+?)\s*-/);
+    if (betweenDashes) return titleCase(betweenDashes[1]);
+
+    return titleCase(
+      normalized
+        .replace(/^chicken\s*-?\s*/i, '')
+        .replace(/-/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+    );
+  }
+
+  function titleCase(value) {
+    return value
+      .toLowerCase()
+      .replace(/\b[a-z]/g, (char) => char.toUpperCase());
+  }
+
+  function getScoreLabel(scoreNum) {
+    if (scoreNum >= 7) return 'Good choice';
+    if (scoreNum >= 4) return 'Moderate';
+    return 'Limit';
+  }
+
+  function getSimpleExplanation(dish, advisory) {
+    const lowerDish = dish.toLowerCase();
+    if (lowerDish.includes('fried chicken')) {
+      return 'Fried chicken can be enjoyed occasionally, but it is likely higher in oil and sodium. Keep the portion modest and balance it with gulay, sabaw, water, and a reasonable amount of rice.';
+    }
+
+    return advisory['Recommendation'] || `${dish} can fit into a Filipino meal when the portion is reasonable. Balance the ulam with gulay, sabaw, water, and about 1 cup of rice.`;
+  }
+
+  function getSimpleAdvice(dish) {
+    const lowerDish = dish.toLowerCase();
+    const betterChoice = lowerDish.includes('chicken')
+      ? 'Inihaw, tinola, air-fried, or less oily manok'
+      : 'Inihaw, tinola, broth-based, steamed, or less oily versions';
+
+    return [
+      ['Watch', 'Oil, sodium, and large portions'],
+      ['Pair with', 'Gulay, sabaw, water, and around 1 cup rice'],
+      ['Better choice', betterChoice]
+    ];
   }
 
   // Draw Bounding Box
@@ -500,10 +848,10 @@ document.addEventListener('DOMContentLoaded', () => {
     
     scanningLaser.style.display = 'block';
     scanningOverlay.style.display = 'block';
-    resultsDiv.style.display = 'none';
+    resultsDiv.classList.remove('is-visible');
     resultsDiv.innerHTML = '';
     boundingBoxContainer.innerHTML = '';
-    window.speechSynthesis.cancel();
+    window.speechSynthesis?.cancel();
 
     const formData = new FormData();
     formData.append('file', currentFile);
@@ -515,197 +863,120 @@ document.addEventListener('DOMContentLoaded', () => {
 
       scanningLaser.style.display = 'none';
       scanningOverlay.style.display = 'none';
-      analyzeBtn.innerText = 'Analyze Dish';
-      resultsDiv.style.display = 'block';
+      analyzeBtn.innerText = 'Analyze again';
+      resultsDiv.classList.add('is-visible');
+      workspace.classList.remove('no-results');
+      rightColumn.classList.add('has-results');
 
       if (!data.detections || data.detections.length === 0) {
         resultsDiv.innerHTML = `
-          <div class="no-detect">No Filipino dish detected. Try another photo.</div>
-          <div class="action-bar">
-            <button class="btn-primary" id="noDetectResetBtn">Try Another Photo</button>
-          </div>
+          <div class="no-detect">No Filipino dish detected. Try a clearer photo with the full plate in view.</div>
         `;
-        document.getElementById('noDetectResetBtn').addEventListener('click', resetApp);
         analyzeBtn.disabled = false;
         return;
       }
 
-      const exportArea = document.createElement('div');
-      exportArea.className = 'exportable-area';
-      exportArea.id = 'exportArea';
-      chatHistories.clear();
-      
-      let fullSpeechText = "";
-
-      data.detections.forEach((det) => {
-        if (det.bbox) {
-          setTimeout(() => {
-            drawBoundingBox(det.bbox, `${det.dish} (${det.confidence}%)`);
-          }, 300);
+      const det = data.detections[0];
+      const dishName = cleanFoodName(det.dish);
+      const advisory = det.advisory || {};
+      const scoreText = advisory['Health Score'] || '5/10';
+      const scoreNum = Number.parseInt(scoreText, 10) || 5;
+      const scoreLabel = getScoreLabel(scoreNum);
+      const explanation = getSimpleExplanation(dishName, advisory);
+      mealContext = {
+        foodName: dishName,
+        confidence: det.confidence,
+        healthScore: scoreText,
+        healthLabel: scoreLabel,
+        advice: {
+          watch: 'Oil, sodium, and large portions',
+          pairWith: 'Gulay, sabaw, water, and around 1 cup rice',
+          betterChoice: getSimpleAdvice(dishName)[2][1]
         }
-
-        const advisory = det.advisory;
-        const scoreText = advisory['Health Score'] || '5/10';
-        const scoreNum = parseInt(scoreText);
-        const scorePercent = (scoreNum / 10) * 100;
-        
-        let scoreColor = 'var(--score-poor)';
-        let scoreDesc = 'High Risk';
-        if (scoreNum >= 7) { scoreColor = 'var(--score-excellent)'; scoreDesc = 'Healthy Choice'; }
-        else if (scoreNum >= 4) { scoreColor = 'var(--score-moderate)'; scoreDesc = 'Moderate'; }
-
-        const r = 50;
-        const circumference = 2 * Math.PI * r;
-        const offset = circumference - (scorePercent / 100) * circumference;
-
-        fullSpeechText += `Detected ${det.dish}. Health Score: ${scoreText}. Nutritional Profile: ${advisory['Nutritional Profile']}. Health Risk: ${advisory['Health Risk']}. Recommendation: ${advisory['Recommendation']}. Healthier Alternative: ${advisory['Healthier Alternative']}. `;
-
-        const grid = document.createElement('div');
-        grid.className = 'results-grid';
-        grid.innerHTML = `
-          <div class="result-item full-width fade-in" style="animation-delay: 0.1s">
-            <div class="dish-header">
-              <h2>${det.dish}</h2>
-              <div class="confidence-badge">${det.confidence}% Match</div>
-            </div>
-          </div>
-
-          <div class="result-item full-width score-wrapper fade-in" style="animation-delay: 0.2s">
-            <div class="score-ring-container">
-              <svg class="score-ring" viewBox="0 0 120 120">
-                <circle class="ring-bg" cx="60" cy="60" r="50"></circle>
-                <circle class="ring-fill" cx="60" cy="60" r="50" style="stroke: ${scoreColor}; stroke-dashoffset: ${circumference};" data-offset="${offset}"></circle>
-              </svg>
-              <div class="score-value" style="color: ${scoreColor}">${scoreNum}</div>
-            </div>
-            <div class="score-text">
-              <h4>Health Score</h4>
-              <p style="color: ${scoreColor}">${scoreDesc}</p>
-            </div>
-          </div>
-
-          <div class="result-item full-width ai-advisor-card fade-in" style="animation-delay: 0.3s">
-            <div class="ai-advisor-header">
-              <div>
-                <span class="ai-kicker">Nutri advisory</span>
-                <h3>Natural nutrition guidance</h3>
-              </div>
-              <span class="ai-live-dot">Live</span>
-            </div>
-            <div class="ai-conversation">
-              <div class="ai-thinking">Analyzing nutritional content of ${det.dish}...</div>
-              <div class="chat-bubble assistant streaming-text" data-dish="${det.dish}"></div>
-            </div>
-            <div class="follow-up-row" data-followups="${det.dish}"></div>
-            <form class="chat-composer" data-dish="${det.dish}">
-              <input class="chat-input" type="text" placeholder="Ask Nutri about portions, health risks, or healthier swaps" autocomplete="off">
-              <button class="chat-send" type="submit">Send</button>
-            </form>
-          </div>
-        `;
-        exportArea.appendChild(grid);
-      });
-
-      resultsDiv.appendChild(exportArea);
-
-      document.querySelectorAll('.streaming-text').forEach((streamTarget) => {
-        const dish = streamTarget.dataset.dish;
-        const card = streamTarget.closest('.ai-advisor-card');
-        const followUps = card.querySelector('.follow-up-row');
-        const thinking = card.querySelector('.ai-thinking');
-        attachChatComposer(card, dish);
-        streamNutriText(streamTarget, dish, '', followUps, thinking, []).then((answer) => {
-          if (answer) addChatHistory(dish, 'assistant', answer);
-        });
-      });
-
-      // Actions Bar
-      const actionBar = document.createElement('div');
-      actionBar.className = 'action-bar';
-      actionBar.innerHTML = `
-        <button class="btn-secondary" id="ttsBtn">Read Advisory</button>
-        <button class="btn-secondary" id="exportBtn">Save Report</button>
-        <button class="btn-secondary btn-icon" id="resetBtn" title="New Scan">✕</button>
-      `;
-      resultsDiv.appendChild(actionBar);
-
-      setTimeout(() => {
-        document.querySelectorAll('.ring-fill').forEach(ring => {
-          ring.style.strokeDashoffset = ring.getAttribute('data-offset');
-        });
-      }, 50);
-
-      // Attach Actions
-      document.getElementById('resetBtn').addEventListener('click', resetApp);
-
-      document.getElementById('ttsBtn').addEventListener('click', () => {
-        if (isSpeaking) {
-          window.speechSynthesis.cancel();
-          isSpeaking = false;
-          document.getElementById('ttsBtn').innerText = 'Read Advisory';
-        } else {
-          // If voices haven't loaded yet, try fetching them again
-          if (availableVoices.length === 0) {
-            availableVoices = window.speechSynthesis.getVoices();
-          }
-
-          // Search for a female voice
-          const preferredVoice = availableVoices.find(voice => 
-            voice.name.includes('Female')
-          );
-
-          if (preferredVoice) {
-            ttsSpeech.voice = preferredVoice;
-          }
-
-          // Optional: You can also tweak pitch and speed here
-          // ttsSpeech.pitch = 1.0; // Range: 0 to 2
-          // ttsSpeech.rate = 0.95;  // Range: 0.1 to 10 (lower is slower)
-
-          ttsSpeech.text = fullSpeechText;
-          window.speechSynthesis.speak(ttsSpeech);
-          isSpeaking = true;
-          document.getElementById('ttsBtn').innerText = 'Stop Reading';
-        }
-      });
-
-      ttsSpeech.onend = () => {
-        isSpeaking = false;
-        const btn = document.getElementById('ttsBtn');
-        if(btn) btn.innerText = 'Read Advisory';
       };
+      resetNutriMemory();
+      const adviceRows = getSimpleAdvice(dishName)
+        .map(([label, text]) => `
+          <div class="advice-item">
+            <strong>${label}</strong>
+            <span>${text}</span>
+          </div>
+        `)
+        .join('');
 
-      document.getElementById('exportBtn').addEventListener('click', async () => {
-        const btn = document.getElementById('exportBtn');
-        const originalText = btn.innerText;
-        btn.innerText = "Generating...";
-        try {
-          const canvas = await html2canvas(document.getElementById('exportArea'), {
-            backgroundColor: '#FDFBF7',
-            scale: 2
-          });
-          const link = document.createElement('a');
-          link.download = 'kaoncheck-advisory.png';
-          link.href = canvas.toDataURL();
-          link.click();
-        } catch (e) {
-          console.error("Export failed", e);
-        }
-        btn.innerText = originalText;
-      });
+      if (det.bbox) {
+        setTimeout(() => {
+          drawBoundingBox(det.bbox, `AI detected: ${dishName}`);
+        }, 300);
+      }
+      scannerCard.classList.add('has-result');
+      scanTitle.textContent = 'AI detected your ulam';
+      scanSubtitle.textContent = dishName;
+      imageDetectionPill.textContent = `AI detected: ${dishName}`;
+
+      resultsDiv.innerHTML = `
+        <article class="result-card">
+          <div class="result-topline">
+            <div class="result-title">
+              <p class="eyebrow">Detected food</p>
+              <h2>${dishName}</h2>
+            </div>
+            <div class="confidence-badge">${det.confidence}% match</div>
+          </div>
+
+          <div class="score-row">
+            <p class="eyebrow">Health score</p>
+            <div class="score-inline">
+              <div class="score-value">${scoreNum}<small>/10</small></div>
+              <span class="label-badge">${scoreLabel}</span>
+            </div>
+          </div>
+
+          <p class="result-copy" id="resultExplanation"></p>
+        </article>
+
+        <article class="advice-card">
+          <h3>Simple advice</h3>
+          <div class="advice-list">
+            ${adviceRows}
+          </div>
+        </article>
+
+        <article class="ask-card" data-streaming="false">
+          <div class="ask-header">
+            <h3>Ask Yobab</h3>
+            <span class="ai-live-dot">Ready</span>
+          </div>
+          <p class="ask-helper">Ask about portions, rice, sodium, health risks, or healthier swaps.</p>
+          <div class="follow-up-row"></div>
+          <form class="chat-composer" data-dish="${dishName}">
+            <input class="chat-input" type="text" placeholder="Ask about this meal..." autocomplete="off">
+            <button class="chat-send" type="submit">Send</button>
+          </form>
+          <div class="answer-preview is-hidden">
+            <h4>Yobab says</h4>
+            <p class="answer-copy"></p>
+          </div>
+          <button class="btn-secondary open-chat-btn" id="openNutriChatBtn" type="button">Open Yobab Chat</button>
+        </article>
+      `;
+
+      const askCard = resultsDiv.querySelector('.ask-card');
+      attachChatComposer(askCard, dishName);
+      renderFollowUps(askCard.querySelector('.follow-up-row'), dishName);
+      document.getElementById('openNutriChatBtn').addEventListener('click', openFullNutriChat);
+      typeText(document.getElementById('resultExplanation'), explanation);
 
     } catch (err) {
       scanningLaser.style.display = 'none';
       scanningOverlay.style.display = 'none';
-      analyzeBtn.innerText = `Analyze Dish`;
-      resultsDiv.style.display = 'block';
+      analyzeBtn.innerText = `Analyze dish`;
+      resultsDiv.classList.add('is-visible');
+      workspace.classList.remove('no-results');
+      rightColumn.classList.add('has-results');
       resultsDiv.innerHTML = `
         <div class="no-detect">Error connecting to server. Is it running?</div>
-        <div class="action-bar">
-          <button class="btn-primary" id="errorResetBtn">Try Again</button>
-        </div>
       `;
-      document.getElementById('errorResetBtn').addEventListener('click', resetApp);
     }
 
     analyzeBtn.disabled = false;

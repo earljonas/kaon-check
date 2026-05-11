@@ -28,7 +28,7 @@ STYLE RULES:
 - For heavy dishes — suggest vegetables, water, soup, modest rice. Hindi fried rice or another greasy side.
 - Sound like you actually care about the person eating, hindi lang about the food"""
 
-SYSTEM_PROMPT = """You are Nutri, a Filipino nutritionist chatbot inside KaonCheck.
+SYSTEM_PROMPT = """You are Yobab, a Filipino nutrition assistant chatbot inside KaonCheck.
 
 You help users understand Filipino food, nutrition, portions, cooking choices, and general health-related eating habits.
 You are warm and practical, but you are not a doctor. For symptoms, diagnosis, medication, pregnancy, kidney disease, diabetes management, eating disorders, allergies, or serious medical conditions, give general food guidance and suggest asking a licensed professional.
@@ -50,7 +50,9 @@ RESPONSE STYLE:
 - Do not start by repeating the dish name with an exclamation.
 - If giving a health score, weave it naturally into a sentence instead of writing a separate "Health score:" line.
 - Do not overclaim exact calories unless data is provided.
-- For rich, salty, fatty, or fried dishes, suggest vegetables, water, soup, and modest plain rice; do not suggest fried rice, extra salty condiments, or another greasy side as the healthier pairing."""
+- For rich, salty, fatty, or fried dishes, suggest vegetables, water, soup, and modest plain rice; do not suggest fried rice, extra salty condiments, or another greasy side as the healthier pairing.
+- Treat short follow-ups like "why?", "how come?", "explain", "what about rice?", "what about gravy?", "can I eat more?", "are you sure?", and "why 1 cup?" as referring to the detected dish and the previous assistant answer.
+- Keep answers short: around 2 to 5 sentences."""
 
 DEFAULT_ADVISORY = {
     "Nutritional Profile": "Depende sa luto at portion, pwede itong maging part ng balanced na pagkain.",
@@ -131,7 +133,7 @@ def get_quick_advisory(dish_name: str) -> dict:
 
 
 def get_health_advisory(dish_name: str) -> dict:
-    prompt = f"""Ikaw si Nutri, isang friendly Filipino nutritionist na nagsasalita ng natural Taglish.
+    prompt = f"""Ikaw si Yobab, isang friendly Filipino nutrition assistant na nagsasalita ng natural Taglish.
 
 Gumawa ka ng maikling health advisory para sa dish na ito: {dish_name}
 
@@ -141,9 +143,9 @@ Health Risk: [1 sentence in natural Taglish — honest pero hindi pananakot]
 Recommendation: [1 practical sentence in Taglish — something they can actually do]
 Healthier Alternative: [1 sentence in Taglish — specific, not generic]
 Health Score: [number from 1-10]/10
-Nutri Says: [2-3 sentences in Taglish — warm, conversational, parang friend mo na nutritionist ang nagsasalita. May personality, hindi boring.]"""
+Yobab Says: [2-3 sentences in Taglish — warm, conversational, parang friend mo na nutrition assistant ang nagsasalita. May personality, hindi boring.]"""
 
-    prompt = f"""You are Nutri, a friendly Filipino nutritionist.
+    prompt = f"""You are Yobab, a friendly Filipino nutrition assistant.
 Create a short advisory for this detected dish: {dish_name}
 
 Use mostly clear English with only light Filipino words when natural.
@@ -155,7 +157,7 @@ Health Risk: [1 honest but calm sentence]
 Recommendation: [1 practical sentence]
 Healthier Alternative: [1 specific sentence]
 Health Score: [number from 1-10]/10
-Nutri Says: [2-3 natural sentences, mostly English, like a kind nutritionist talking]"""
+Yobab Says: [2-3 natural sentences, mostly English, like a kind nutrition assistant talking]"""
 
     try:
         response = ollama.chat(
@@ -176,8 +178,8 @@ Nutri Says: [2-3 natural sentences, mostly English, like a kind nutritionist tal
 
 
 def stream_nutrition_reply(dish_name: str, question: str = "", history_json: str = ""):
-    if _is_out_of_scope(question, dish_name):
-        fallback = _fallback_nutri_reply(dish_name, question)
+    if _is_out_of_scope(question, dish_name, history_json):
+        fallback = _fallback_nutri_reply(dish_name, question, history_json)
         for word in fallback.split(" "):
             yield word + " "
         return
@@ -210,7 +212,7 @@ def stream_nutrition_reply(dish_name: str, question: str = "", history_json: str
             if content:
                 yield content
     except Exception:
-        fallback = _fallback_nutri_reply(dish_name, question)
+        fallback = _fallback_nutri_reply(dish_name, question, history_json)
         for word in fallback.split(" "):
             yield word + " "
 
@@ -222,7 +224,8 @@ def _build_chat_messages(dish_name: str, topic: str, history_json: str) -> list[
             "role": "user",
             "content": (
                 f"Detected dish from the photo: {dish_name}. "
-                "Keep every answer focused on food, nutrition, portions, cooking choices, and healthy eating."
+                "Keep every answer focused on food, nutrition, portions, cooking choices, and healthy eating. "
+                "If the user asks a short follow-up such as 'why?', use the previous assistant answer as context."
             ),
         },
     ]
@@ -252,9 +255,23 @@ def _parse_history(history_json: str) -> list[dict[str, str]]:
     return parsed
 
 
-def _is_out_of_scope(question: str, dish_name: str) -> bool:
+def _is_out_of_scope(question: str, dish_name: str, history_json: str = "") -> bool:
     ask = question.lower().strip()
     if not ask:
+        return False
+
+    follow_up_terms = (
+        "why", "why?", "why not", "how come", "what do you mean", "explain",
+        "explain more", "what about", "is that bad", "can i eat more",
+        "how often", "every day", "everyday", "why 1 cup", "why avoid",
+        "skin", "gravy", "sawsawan", "rice", "are you sure", "sure",
+        "really", "is that true", "can you confirm", "confirm"
+    )
+    has_meal_history = any(
+        item.get("role") == "assistant" and str(item.get("content", "")).strip()
+        for item in _parse_history(history_json)
+    )
+    if has_meal_history and any(term in ask for term in follow_up_terms):
         return False
 
     food_terms = (
@@ -271,15 +288,22 @@ def _is_out_of_scope(question: str, dish_name: str) -> bool:
     return not any(term in ask for term in food_terms + dish_terms)
 
 
-def _fallback_nutri_reply(dish_name: str, question: str = "") -> str:
+def _fallback_nutri_reply(dish_name: str, question: str = "", history_json: str = "") -> str:
     advisory = get_quick_advisory(dish_name)
     score = advisory.get("Health Score", "6/10")
     ask = question.lower()
 
-    if _is_out_of_scope(question, dish_name):
+    if _is_out_of_scope(question, dish_name, history_json):
         return (
-            "I can help with food and health questions only. "
+            "I can help with ulam and nutrition questions only. "
             f"If you want, ask me how {dish_name} affects blood pressure, portions, sugar, cholesterol, or healthier cooking choices."
+        )
+
+    if any(term in ask for term in ("are you sure", "sure", "really", "is that true", "confirm")):
+        return (
+            f"Yes, for general guidance, that advice still fits {dish_name}. "
+            "Because it can be oily and salty, pairing it with gulay or sabaw, water, and moderate rice helps balance the meal. "
+            "It is not a ban, just a smarter plate setup."
         )
 
     if "hypertension" in ask or "blood pressure" in ask:

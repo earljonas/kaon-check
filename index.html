@@ -2,69 +2,112 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>KaonCheck - Filipino Diet Advisor</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KaonCheck - Filipino Food Scanner</title>
   <link rel="stylesheet" href="/static/styles.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </head>
 <body>
+  <div class="app-shell">
+    <header class="app-header">
+      <a class="brand-mark" href="/" aria-label="KaonCheck home">
+        <span class="brand-symbol">K</span>
+        <span>
+          <strong>KaonCheck</strong>
+          <small>Filipino Food Scanner</small>
+        </span>
+      </a>
 
-<div class="container">
-  <header>
-    <h1>KaonCheck</h1>
-    <p>A Filipino Dietary & Health Advisory</p>
-  </header>
+      <div class="header-status" aria-label="Scanner status">
+        <span class="status-dot" aria-hidden="true"></span>
+        Local scanner ready
+      </div>
+    </header>
 
-  <div class="card" id="mainCard">
-    <div class="upload-zone" id="uploadZone">
-      <div class="upload-icon">📷</div>
-      <p>Tap to upload or take a photo of your meal</p>
-      <input type="file" id="fileInput" accept="image/*" style="display:none"/>
-    </div>
+    <main class="workspace no-results">
+      <section class="card scanner-card" aria-labelledby="scanTitle">
+        <div class="scanner-copy">
+          <p class="eyebrow">Meal scan</p>
+          <h1 id="scanTitle">Check your Filipino meal in seconds.</h1>
+          <p id="scanSubtitle">Upload a photo or open your camera to scan your ulam.</p>
+        </div>
 
-    <div class="preview-container" id="previewContainer">
-      <img id="preview" alt="Food Preview"/>
-      <div class="scanning-laser" id="scanningLaser"></div>
-      <div class="scanning-overlay" id="scanningOverlay"></div>
-      <div id="boundingBoxContainer"></div>
-    </div>
+        <div class="upload-zone" id="uploadZone" role="button" tabindex="0" aria-label="Upload a food photo">
+          <div class="upload-glyph" aria-hidden="true"><span></span></div>
+          <h2>Drop a food photo here</h2>
+          <p>Best with clear lighting and the full plate visible.</p>
+          <input type="file" id="fileInput" accept="image/*" hidden />
+        </div>
 
-    <div class="btn-row">
-      <button class="btn-primary" id="analyzeBtn" disabled>
-        Analyze Dish
-      </button>
-      <button class="btn-secondary" id="cameraBtn">
-        Camera
-      </button>
+        <div class="preview-container" id="previewContainer">
+          <img id="preview" alt="Selected food preview" />
+          <div class="image-detection-pill" id="imageDetectionPill">AI detected your ulam</div>
+          <div class="scanning-laser" id="scanningLaser"></div>
+          <div class="scanning-overlay" id="scanningOverlay"></div>
+          <div id="boundingBoxContainer"></div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn-primary" id="uploadBtn" type="button">Upload photo</button>
+          <button class="btn-secondary" id="cameraBtn" type="button">Open camera</button>
+          <button class="btn-primary is-hidden" id="analyzeBtn" type="button" disabled>Analyze dish</button>
+          <button class="btn-secondary is-hidden" id="newScanBtn" type="button">New scan</button>
+        </div>
+      </section>
+
+      <aside class="right-column">
+        <section id="results" class="results-stack" aria-live="polite">
+          <!-- Results injected here by app.js -->
+        </section>
+        <p class="disclaimer">General nutrition guidance only, not medical diagnosis.</p>
+      </aside>
+    </main>
+  </div>
+
+  <div class="modal" id="cameraModal" aria-hidden="true">
+    <div class="modal-inner ar-mode" role="dialog" aria-modal="true" aria-labelledby="cameraTitle">
+      <div class="camera-header">
+        <div>
+          <p class="eyebrow">Live scan</p>
+          <h3 id="cameraTitle">Camera scanner</h3>
+        </div>
+        <button class="close-icon-btn" id="closeCamera" type="button" aria-label="Close camera">X</button>
+      </div>
+
+      <div class="camera-wrapper">
+        <video id="cameraFeed" autoplay playsinline></video>
+        <div class="camera-status" id="cameraStatus">Starting camera...</div>
+        <div class="scanning-laser" id="liveScanningLaser" style="display:none;"></div>
+        <div class="scanning-overlay" id="liveScanningOverlay" style="display:none;"></div>
+        <div id="liveBoundingBoxContainer"></div>
+        <div id="liveArOverlayContainer"></div>
+      </div>
+
+      <canvas id="snapshot" hidden></canvas>
     </div>
   </div>
 
-  <div id="results">
-    <!-- Results injected here by app.js -->
-  </div>
-</div>
+  <div class="modal nutri-chat-modal" id="nutriChatModal" aria-hidden="true">
+    <div class="nutri-chat-dialog" role="dialog" aria-modal="true" aria-labelledby="nutriChatTitle">
+      <header class="nutri-chat-header">
+        <div>
+          <p class="eyebrow">Yobab</p>
+          <h3 id="nutriChatTitle">Meal chat</h3>
+        </div>
+        <button class="close-icon-btn" id="closeNutriChat" type="button" aria-label="Close Yobab chat">X</button>
+      </header>
 
-<!-- Camera Modal -->
-<div class="modal" id="cameraModal">
-  <div class="modal-inner ar-mode">
-    <div class="camera-header">
-      <h3>AR Live Scanner</h3>
-      <button class="close-icon-btn" id="closeCamera">✕</button>
+      <div class="nutri-chat-messages" id="nutriChatMessages" aria-live="polite"></div>
+
+      <div class="nutri-chat-bottom">
+        <div class="modal-follow-up-row" id="modalFollowUps"></div>
+        <form class="nutri-chat-composer" id="nutriChatForm">
+          <input id="nutriChatInput" type="text" placeholder="Ask about this meal..." autocomplete="off">
+          <button class="chat-send" type="submit">Send</button>
+        </form>
+      </div>
     </div>
-    
-    <div class="camera-wrapper">
-      <video id="cameraFeed" autoplay playsinline></video>
-      <div class="camera-status" id="cameraStatus">Starting camera...</div>
-      <div class="scanning-laser" id="liveScanningLaser" style="display:none;"></div>
-      <div class="scanning-overlay" id="liveScanningOverlay" style="display:none;"></div>
-      <div id="liveBoundingBoxContainer"></div>
-      <div id="liveArOverlayContainer"></div>
-    </div>
-
-    <canvas id="snapshot" style="display:none"></canvas>
   </div>
-</div>
 
-<script src="/static/app.js"></script>
+  <script src="/static/app.js"></script>
 </body>
 </html>
