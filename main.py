@@ -1,11 +1,12 @@
-from fastapi import FastAPI, File, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, File, Form, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from ultralytics import YOLO
-from nlp import get_health_advisory
+from nlp import get_quick_advisory, stream_nutrition_reply
 import shutil
 import os
+import uuid
 
 app = FastAPI()
 
@@ -20,12 +21,17 @@ model = YOLO("runs/detect/kaoncheck-4/weights/best.pt")
 
 @app.post("/analyze")
 async def analyze(file: UploadFile = File(...)):
-    temp_path = f"temp_{file.filename}"
-    with open(temp_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    _, ext = os.path.splitext(file.filename or "")
+    temp_path = f"temp_{uuid.uuid4().hex}{ext or '.jpg'}"
 
-    results = model(temp_path)
-    os.remove(temp_path)
+    try:
+        with open(temp_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        results = model(temp_path)
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
     detections = []
     seen = set()
@@ -38,7 +44,7 @@ async def analyze(file: UploadFile = File(...)):
             seen.add(dish_name)
             confidence = float(box.conf[0])
             bbox = box.xyxyn[0].tolist()
-            advisory = get_health_advisory(dish_name)
+            advisory = get_quick_advisory(dish_name)
             detections.append({
                 "dish": dish_name,
                 "confidence": round(confidence * 100, 1),
@@ -50,6 +56,19 @@ async def analyze(file: UploadFile = File(...)):
         return {"message": "No dish detected", "detections": []}
 
     return {"detections": detections}
+
+
+@app.post("/advisor/stream")
+async def advisor_stream(
+    dish: str = Form(...),
+    question: str = Form(""),
+    history: str = Form("")
+):
+    return StreamingResponse(
+        stream_nutrition_reply(dish, question, history),
+        media_type="text/plain; charset=utf-8",
+    )
+
 
 app.mount("/static", StaticFiles(directory="."), name="static")
 

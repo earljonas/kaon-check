@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>KaonCheck - Filipino Diet Advisor</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="/static/styles.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </head>
 <body>
@@ -54,6 +54,7 @@
     
     <div class="camera-wrapper">
       <video id="cameraFeed" autoplay playsinline></video>
+      <div class="camera-status" id="cameraStatus">Starting camera...</div>
       <div class="scanning-laser" id="liveScanningLaser" style="display:none;"></div>
       <div class="scanning-overlay" id="liveScanningOverlay" style="display:none;"></div>
       <div id="liveBoundingBoxContainer"></div>
@@ -64,6 +65,6 @@
   </div>
 </div>
 
-<script src="app.js"></script>
+<script src="/static/app.js"></script>
 </body>
 </html>
