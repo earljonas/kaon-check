@@ -17,22 +17,21 @@ document.addEventListener('DOMContentLoaded', () => {
   const boundingBoxContainer = document.getElementById('boundingBoxContainer');
   const scanningLaser = document.getElementById('scanningLaser');
   const scanningOverlay = document.getElementById('scanningOverlay');
-  
-  // Camera Elements
+
+  // DOM elements for the camera
   const cameraModal = document.getElementById('cameraModal');
   const cameraFeed = document.getElementById('cameraFeed');
   const cameraStatus = document.getElementById('cameraStatus');
   const closeCamera = document.getElementById('closeCamera');
   const snapshot = document.getElementById('snapshot');
 
-  // AR Live Scanner Elements
+  // Scanning UI bits
   const liveScanningLaser = document.getElementById('liveScanningLaser');
   const liveScanningOverlay = document.getElementById('liveScanningOverlay');
   const liveBoundingBoxContainer = document.getElementById('liveBoundingBoxContainer');
   const liveArOverlayContainer = document.getElementById('liveArOverlayContainer');
 
-  // Full Yobab chat modal elements. The modal uses the same in-memory
-  // messages array as the compact Ask Yobab card.
+  // The chat modal uses the same messages array as the smaller card
   const nutriChatModal = document.getElementById('nutriChatModal');
   const closeNutriChat = document.getElementById('closeNutriChat');
   const nutriChatMessages = document.getElementById('nutriChatMessages');
@@ -48,8 +47,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentLiveDish = '';
   let mealContext = null;
 
-  // Conversation memory for the current browser session only.
-  // No database and no localStorage yet.
+  // Store the conversation in memory for this session
   let messages = [
     { role: 'assistant', content: 'Ask me about this meal.' }
   ];
@@ -90,7 +88,7 @@ document.addEventListener('DOMContentLoaded', () => {
     fileInput.value = '';
     currentFile = null;
     mealContext = null;
-    resetNutriMemory();
+    resetYobabMemory();
     analyzeBtn.disabled = true;
   }
 
@@ -98,7 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
     currentFile = file;
     const url = URL.createObjectURL(file);
     preview.src = url;
-    
+
     uploadZone.style.display = 'none';
     previewContainer.style.display = 'block';
     scannerCard.classList.add('has-image');
@@ -111,14 +109,15 @@ document.addEventListener('DOMContentLoaded', () => {
     cameraBtn.classList.add('is-hidden');
     analyzeBtn.classList.remove('is-hidden');
     newScanBtn.classList.remove('is-hidden');
-    
+
     analyzeBtn.disabled = false;
+    analyzeBtn.innerText = 'Analyze dish';
     resultsDiv.classList.remove('is-visible');
     rightColumn.classList.remove('has-results');
     resultsDiv.innerHTML = '';
     boundingBoxContainer.innerHTML = '';
     mealContext = null;
-    resetNutriMemory();
+    resetYobabMemory();
     window.speechSynthesis?.cancel();
   }
 
@@ -175,7 +174,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Camera & AR Live Scanner 
+  // Opens the camera and starts the live scanning loop
   cameraBtn.addEventListener('click', async () => {
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -191,15 +190,15 @@ document.addEventListener('DOMContentLoaded', () => {
       cameraFeed.srcObject = stream;
       await cameraFeed.play();
       await waitForVideoReady(cameraFeed);
-      
+
       liveScanningLaser.style.display = 'block';
       liveScanningOverlay.style.display = 'block';
       liveBoundingBoxContainer.innerHTML = '';
       liveArOverlayContainer.innerHTML = '';
       liveScanFailures = 0;
       setCameraStatus('Scanning...');
-      
-      // Start Live Scan Loop
+
+      // Run the initial scan, then repeat every 2 seconds
       await scanLiveFrame();
       scanInterval = setInterval(scanLiveFrame, 2000);
     } catch (err) {
@@ -221,7 +220,7 @@ document.addEventListener('DOMContentLoaded', () => {
     isScanning = true;
 
     try {
-      // Capture frame to hidden canvas
+      // Snag a frame and send it to the backend
       snapshot.width = cameraFeed.videoWidth;
       snapshot.height = cameraFeed.videoHeight;
       const ctx = snapshot.getContext('2d');
@@ -236,17 +235,17 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = await res.json();
       liveScanFailures = 0;
       setCameraStatus(data.detections && data.detections.length > 0 ? '' : 'Scanning...');
-      
+
       liveBoundingBoxContainer.innerHTML = '';
 
       if (data.detections && data.detections.length > 0) {
-        // Render AR Overlays for the first detected dish to keep it clean
-        const det = data.detections[0]; 
-        
+        // Just show the first thing we find to keep the screen clean
+        const det = data.detections[0];
+
         if (det.bbox) {
           drawLiveBoundingBox(det.bbox);
         }
-        
+
         if (det.dish !== currentLiveDish) {
           currentLiveDish = det.dish;
           liveArOverlayContainer.innerHTML = '';
@@ -277,7 +276,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const y1 = bbox[1] * videoHeight;
     const x2 = bbox[2] * videoWidth;
     const y2 = bbox[3] * videoHeight;
-    
+
     const width = x2 - x1;
     const height = y2 - y1;
 
@@ -295,7 +294,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const advisory = det.advisory;
     const scoreText = advisory['Health Score'] || '5/10';
     const scoreNum = parseInt(scoreText);
-    
+
     let scoreColor = '#bf3f32';
     let scoreDesc = 'High Risk';
     if (scoreNum >= 7) { scoreColor = '#1f7a4f'; scoreDesc = 'Healthy Choice'; }
@@ -330,7 +329,7 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
     `;
     liveArOverlayContainer.appendChild(card);
-    streamNutriText(card.querySelector('.ar-ai-copy'), det.dish, '', null, card.querySelector('.ar-thinking'));
+    streamYobabText(card.querySelector('.ar-ai-copy'), det.dish, '', null, card.querySelector('.ar-thinking'));
   }
 
   function getFollowUpQuestions(dish) {
@@ -355,7 +354,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  async function streamNutriText(target, dish, question = '', followUpContainer = null, thinkingTarget = null, history = []) {
+  async function streamYobabText(target, dish, question = '', followUpContainer = null, thinkingTarget = null, history = []) {
     target.textContent = '';
     target.classList.add('is-streaming');
     if (thinkingTarget) {
@@ -433,7 +432,7 @@ document.addEventListener('DOMContentLoaded', () => {
     answerCopy.classList.add('is-streaming');
     if (followUps) followUps.innerHTML = '';
 
-    await sendNutriMessage(message, {
+    await sendYobabMessage(message, {
       onStart: () => {
         answerCopy.textContent = '';
       },
@@ -458,9 +457,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (sendButton) sendButton.disabled = false;
   }
 
-  // Main streaming sender for both compact Ask Yobab and the full modal.
-  // It keeps memory in the messages array while using the backend stream when available.
-  async function sendNutriMessage(userMessage, hooks = {}) {
+  // Common function to send messages to Yobab
+  async function sendYobabMessage(userMessage, hooks = {}) {
     const historyBeforeUserMessage = [...messages];
     messages.push({ role: 'user', content: userMessage });
     hooks.onThinking?.();
@@ -495,7 +493,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     } catch (error) {
       console.error('Yobab stream failed, using local fallback:', error);
-      answer = getNutriReply(userMessage, historyBeforeUserMessage, mealContext);
+      answer = getYobabReply(userMessage, historyBeforeUserMessage, mealContext);
       hooks.onStart?.();
       await hooks.onToken?.(answer, answer);
     }
@@ -506,9 +504,8 @@ document.addEventListener('DOMContentLoaded', () => {
     return answer;
   }
 
-  // Placeholder Yobab brain. Replace this later with a real API call if needed.
-  // It receives the latest user message, full conversation memory, and meal context.
-  function getNutriReply(userMessage, messages, mealContext) {
+  // Local fallback logic if the AI server is down
+  function getYobabReply(userMessage, messages, mealContext) {
     const normalized = userMessage.toLowerCase();
     const dish = mealContext?.foodName || 'Fried Chicken';
 
@@ -658,7 +655,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function resetNutriMemory() {
+  function resetYobabMemory() {
     messages = [
       { role: 'assistant', content: 'Ask me about this meal.' }
     ];
@@ -709,7 +706,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const submitButton = nutriChatForm.querySelector('button');
     submitButton.disabled = true;
 
-    await sendNutriMessage(message, {
+    await sendYobabMessage(message, {
       onThinking: () => renderChatMessages('Yobab is thinking...'),
       onStart: () => renderChatMessages(''),
       onToken: async (_chunk, draft) => renderChatMessages(draft),
@@ -811,16 +808,16 @@ document.addEventListener('DOMContentLoaded', () => {
     ];
   }
 
-  // Draw Bounding Box
+  // Renders the box around detected items on the preview
   function drawBoundingBox(bbox, label) {
     const imgWidth = preview.clientWidth;
     const imgHeight = preview.clientHeight;
-    
+
     const x1 = bbox[0] * imgWidth;
     const y1 = bbox[1] * imgHeight;
     const x2 = bbox[2] * imgWidth;
     const y2 = bbox[3] * imgHeight;
-    
+
     const width = x2 - x1;
     const height = y2 - y1;
 
@@ -839,13 +836,13 @@ document.addEventListener('DOMContentLoaded', () => {
     boundingBoxContainer.appendChild(box);
   }
 
-  // Analyze Image
+  // The main button logic for analyzing an uploaded image
   analyzeBtn.addEventListener('click', async () => {
     if (!currentFile) return;
 
     analyzeBtn.disabled = true;
     analyzeBtn.innerText = 'Analyzing...';
-    
+
     scanningLaser.style.display = 'block';
     scanningOverlay.style.display = 'block';
     resultsDiv.classList.remove('is-visible');
@@ -894,7 +891,7 @@ document.addEventListener('DOMContentLoaded', () => {
           betterChoice: getSimpleAdvice(dishName)[2][1]
         }
       };
-      resetNutriMemory();
+      resetYobabMemory();
       const adviceRows = getSimpleAdvice(dishName)
         .map(([label, text]) => `
           <div class="advice-item">

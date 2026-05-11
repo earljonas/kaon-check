@@ -1,386 +1,576 @@
+"""
+Chatbot logic for KaonCheck.
+Handles detection intent, tracking conversation history, and talking to the AI.
+"""
+
 import json
+import re
 import ollama
 
+# Just keeping track of how much history to send to the model
 MODEL_NAME = "llama3.1"
 MAX_HISTORY_MESSAGES = 10
 
-SYSTEM_PROMPT = """Ikaw si Nutri, isang friendly at passionate na Filipino nutritionist na nag-aral sa UP Manila at nagtrabaho sa mga ospital sa Maynila bago mag-focus sa community nutrition.
+# Quick lookup for nutrition info on the dishes we detect
+FOOD_KNOWLEDGE = {
+    # --- CHICKEN ---
+    "adobong iga": {
+        "category": "moderate",
+        "risks": ["sodium from soy sauce", "fat from iga (rib) cuts"],
+        "pair_with": ["gulay", "sabaw", "water", "1 cup rice"],
+        "better_choice": ["chicken adobo with breast meat", "less soy sauce version"],
+        "score": 6,
+        "notes": "Tasty but the rib cut is fatty. Better with less soy sauce.",
+    },
+    "chicken inasal": {
+        "category": "healthier",
+        "risks": ["oil from basting", "sodium from marinade"],
+        "pair_with": ["gulay", "sabaw", "water", "1 cup rice"],
+        "better_choice": ["inasal with less oil basting", "remove skin before eating"],
+        "score": 7,
+        "notes": "Grilled is usually a win. Just watch the basting oil.",
+    },
+    "fried chicken": {
+        "category": "fried",
+        "risks": ["oil from deep frying", "sodium", "large portions"],
+        "pair_with": ["gulay", "sabaw", "water", "1 cup rice"],
+        "better_choice": ["inihaw na manok", "tinola", "air-fried chicken", "chicken inasal"],
+        "score": 5,
+        "notes": "The skin and breading soak up a lot of oil.",
+    },
+    # --- FISH ---
+    "daing na bangus": {
+        "category": "moderate",
+        "risks": ["oil from frying", "sodium from salt curing"],
+        "pair_with": ["gulay", "sabaw", "vinegar dip", "1 cup rice"],
+        "better_choice": ["grilled bangus", "inihaw na bangus", "sinigang na bangus"],
+        "score": 6,
+        "notes": "Bangus has good fats, but frying it in oil adds a lot of calories.",
+    },
+    "pan fried tilapia": {
+        "category": "moderate",
+        "risks": ["oil from pan frying", "sodium from seasoning"],
+        "pair_with": ["gulay", "sabaw", "water", "1 cup rice"],
+        "better_choice": ["steamed tilapia", "sinigang na tilapia", "grilled tilapia"],
+        "score": 6,
+        "notes": "Good lean protein. Better if steamed or grilled instead of fried.",
+    },
+    "sinaing na tulingan": {
+        "category": "healthier",
+        "risks": ["sodium from salt", "slight bitterness if overcooked"],
+        "pair_with": ["gulay", "moderate rice", "water"],
+        "better_choice": ["sinaing with less salt and more kamias"],
+        "score": 7,
+        "notes": "Slow-cooked and healthy. Just don't go overboard with the salt.",
+    },
+    # --- PORK ---
+    "breaded pork chop": {
+        "category": "fried",
+        "risks": ["oil from frying", "sodium", "breading adds carbs and calories"],
+        "pair_with": ["gulay", "sabaw", "water", "1 cup rice"],
+        "better_choice": ["grilled pork chop", "baked pork chop without breading"],
+        "score": 5,
+        "notes": "Breading is basically an oil sponge. Skip it if you can.",
+    },
+    "lechon kawali": {
+        "category": "high-fat",
+        "risks": ["saturated fat", "sodium", "cholesterol", "deep-fried pork belly"],
+        "pair_with": ["atchara", "gulay", "water", "small rice"],
+        "better_choice": ["grilled liempo", "inihaw na baboy", "lechon manok (roasted)"],
+        "score": 4,
+        "notes": "Super heavy. Definitely a 'once in a while' treat.",
+    },
+    "pork bistek": {
+        "category": "moderate",
+        "risks": ["sodium from soy sauce and calamansi marinade", "fat from pork cut"],
+        "pair_with": ["gulay", "sabaw", "water", "1 cup rice"],
+        "better_choice": ["bistek with leaner pork or chicken", "less soy sauce"],
+        "score": 6,
+        "notes": "The soy sauce marinade is a sodium bomb. Go light on it.",
+    },
+    # --- RICE ---
+    "boiled rice": {
+        "category": "staple",
+        "risks": ["refined carbs if white rice", "large portions spike blood sugar"],
+        "pair_with": ["any ulam", "gulay", "sabaw"],
+        "better_choice": ["brown rice", "half-cup portion", "cauliflower rice"],
+        "score": 6,
+        "notes": "Standard fuel. Just keep the portion to around 1 cup.",
+    },
+    "fried rice": {
+        "category": "moderate",
+        "risks": ["extra oil", "sodium from seasoning", "added calories vs plain rice"],
+        "pair_with": ["gulay", "sabaw", "water"],
+        "better_choice": ["plain boiled rice", "brown rice", "smaller fried rice portion"],
+        "score": 5,
+        "notes": "Adds extra oil and salt to your carbs. Boiled rice is safer.",
+    },
+}
 
-Mahal mo ang pagkain ng mga Pilipino — hindi ka yung tipong nutritionist na sasabihang huwag kumain ng lechon. You know that food is culture, memory, and love. Pero alam mo rin kung paano ibalance ang enjoyment at health.
+# The instructions for the AI on how to behave
+YOBAB_SYSTEM_PROMPT = """You are Yobab, the nutrition assistant inside KaonCheck, a Filipino food scanner app.
 
-HOW YOU TALK:
-- Natural Taglish — the way real Filipinos actually talk, hindi forced
-- Warm, direct, at may konting humor pag appropriate
-- Hindi ka nagbibigay ng lecture. You give real talk.
-- You say things like "ay", "kasi", "naman", "ha", "diba", "yung ganun", "charot" pag light lang ang usapan
-- You sound like a friend who happens to know a lot about nutrition
-- Hindi ka robotic. Hindi ka mag-eenumerate ng steps unless tinatanong
+PERSONALITY:
+- Warm, direct, and practical.
+- Filipino-aware — you know Filipino dishes, ingredients, and eating habits.
+- Slightly funny when it fits, but never cringe or try-hard.
+- You are not a comedian. You are not overly medical. Practical first, personality second.
+- Use simple English with natural Filipino food words: ulam, kanin, gulay, sabaw, sawsawan, bantayan.
 
-WHAT YOU COVER:
-- Filipino dishes, nutrition, diet habits, portions, ingredients, cooking methods, general wellness
-- If someone asks about symptoms, diagnosis, or serious medical conditions — give general food guidance and gently suggest they see a licensed professional. Hindi ka doctor.
-- If someone goes off-topic sa food — redirect them back warmly, hindi parang robot
+WHAT YOU DO:
+- Help users understand their detected meal: nutrition, portions, cooking methods, pairings, health risks, fitness goals, and healthier swaps.
+- Give general nutrition guidance only.
+- Treat short follow-ups like "why?", "are you sure?", "really?", "what about rice?" as referring to the detected meal and your previous answer.
+- Fitness and body goal questions (gym, cutting, bulking, weight loss) are VALID when they relate to the detected meal.
 
-STYLE RULES:
-- 4 to 6 sentences lang usually. Hindi mahabang essay.
-- No markdown tables, no rigid labels unless specifically asked
-- Don't overclaim exact calories unless given data
-- For heavy dishes — suggest vegetables, water, soup, modest rice. Hindi fried rice or another greasy side.
-- Sound like you actually care about the person eating, hindi lang about the food"""
-
-SYSTEM_PROMPT = """You are Yobab, a Filipino nutrition assistant chatbot inside KaonCheck.
-
-You help users understand Filipino food, nutrition, portions, cooking choices, and general health-related eating habits.
-You are warm and practical, but you are not a doctor. For symptoms, diagnosis, medication, pregnancy, kidney disease, diabetes management, eating disorders, allergies, or serious medical conditions, give general food guidance and suggest asking a licensed professional.
-If the user asks about anything outside food, nutrition, cooking, portions, or health-related eating, politely redirect them back to food and health.
-
-LANGUAGE STYLE:
-- Use mostly clear English, around 80-90%.
-- Add only light, natural Filipino words when they fit, around 10-20%.
-- Safe Filipino words: masarap, konti, gulay, kanin, ulam, maalat, matamis, mantika, sabaw, minsan, araw-araw, ingat.
-- Do not force deep Tagalog. If the sentence sounds awkward in Tagalog, write it in English.
-- Keep nutrition terms in English: sodium, protein, fiber, saturated fat, blood pressure, cholesterol, calories.
-- Avoid fake-sounding jokes, "haha", "charot", exaggerated slang, or awkward lines like "Anong dish ito?"
-
-RESPONSE STYLE:
-- Sound like a real nutritionist talking kindly, not a report template.
-- Usually write 4 to 6 short sentences.
-- No markdown tables.
-- Do not use rigid labels like Nutrition, Risk, Recommendation, or Alternative unless asked.
+WHAT YOU DO NOT DO:
+- Do not diagnose, prescribe medication, or pretend to know exact calories from an image.
+- Do not use markdown tables or rigid labels unless specifically asked.
 - Do not start by repeating the dish name with an exclamation.
-- If giving a health score, weave it naturally into a sentence instead of writing a separate "Health score:" line.
-- Do not overclaim exact calories unless data is provided.
-- For rich, salty, fatty, or fried dishes, suggest vegetables, water, soup, and modest plain rice; do not suggest fried rice, extra salty condiments, or another greasy side as the healthier pairing.
-- Treat short follow-ups like "why?", "how come?", "explain", "what about rice?", "what about gravy?", "can I eat more?", "are you sure?", and "why 1 cup?" as referring to the detected dish and the previous assistant answer.
-- Keep answers short: around 2 to 5 sentences."""
+- For serious medical conditions (diabetes management, kidney disease, allergies, eating disorders), give gentle general food guidance and suggest seeing a licensed professional.
 
-DEFAULT_ADVISORY = {
-    "Nutritional Profile": "Depende sa luto at portion, pwede itong maging part ng balanced na pagkain.",
-    "Health Risk": "Ang pinaka-importante ay yung portion size at kung gaano kadalas mo itong kinakain.",
-    "Recommendation": "I-balance mo siya ng gulay, tubig, at tamang dami ng kanin.",
-    "Healthier Alternative": "Subukan mo ang grilled, steamed, o yung may mas maraming gulay na version.",
-    "Health Score": "6/10",
+STYLE:
+- Keep answers to 2-5 sentences usually.
+- Sound like a knowledgeable friend, not a report template.
+- Do not overclaim exact calorie counts.
+- For heavy/fried/salty dishes, suggest gulay, sabaw, water, and modest plain rice — never fried rice or another greasy side.
+
+UNRELATED QUESTIONS:
+- If the user asks something clearly unrelated to food, nutrition, health, fitness, or the detected meal, respond with:
+  "I'm here for ulam and nutrition questions only. Ask me about this meal, portions, rice, health risks, fitness goals, or healthier swaps."
+"""
+
+def normalize_text(text: str) -> str:
+    """Clean up text for easier matching."""
+    text = text.lower().strip()
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+
+def is_short_follow_up(text: str) -> bool:
+    """Detect if the user is just asking a quick follow-up question."""
+    normalized = normalize_text(text)
+    word_count = len(normalized.split())
+    if word_count <= 5 and "?" in text:
+        return True
+    short_patterns = [
+        "why", "why not", "how come", "really", "sure", "are you sure",
+        "is that true", "confirm", "explain", "explain more", "what do you mean",
+        "what about that", "go on", "tell me more", "and then", "so what",
+        "how so", "like what", "for real", "seriously", "is it", "can i",
+        "what else", "anything else", "ok but", "yes but", "no but",
+    ]
+    return any(normalized == p or normalized == p + "?" for p in short_patterns)
+
+
+# Patterns to catch people trying to talk about crypto or coding
+_UNRELATED_PATTERNS = [
+    r"\b(code|coding|programming|python|javascript|html|css|react)\b",
+    r"\b(crypto|bitcoin|ethereum|nft|blockchain)\b",
+    r"\b(president|politics|election|senator|government)\b",
+    r"\b(essay|homework|assignment|thesis|math problem)\b",
+    r"\b(movie|anime|netflix|spotify|tiktok|youtube)\b",
+    r"\b(girlfriend|boyfriend|love advice|relationship)\b",
+    r"\b(stock market|invest|trading)\b",
+    r"\b(weather forecast|temperature today)\b",
+    r"\b(translate|translation)\b",
+    r"\b(game|gaming|valorant|mobile legends|genshin)\b",
+]
+_UNRELATED_RE = re.compile("|".join(_UNRELATED_PATTERNS), re.IGNORECASE)
+
+
+def is_clearly_unrelated(text: str) -> bool:
+    """Check if the question is totally off-topic."""
+    normalized = normalize_text(text)
+    if len(normalized.split()) <= 5:
+        return False  # Give short messages the benefit of the doubt
+    return bool(_UNRELATED_RE.search(normalized))
+
+
+# Big list of keywords related to what this app is for
+_NUTRITION_TERMS = {
+    # food & meals
+    "food", "eat", "eating", "meal", "dish", "ulam", "kanin", "gulay", "sabaw",
+    "sawsawan", "rice", "meat", "fish", "pork", "chicken", "beef", "egg",
+    "vegetable", "fruit", "snack", "breakfast", "lunch", "dinner", "merienda",
+    "gravy", "sauce", "skin", "oil", "fried", "grilled", "steamed", "boiled",
+    # model-specific dish names
+    "adobong", "iga", "inasal", "daing", "bangus", "tilapia", "tulingan",
+    "sinaing", "bistek", "lechon", "kawali", "pork chop", "breaded",
+    "inihaw", "nilaga", "sinigang", "adobo", "tinola", "lumpia", "sisig",
+    "pancit", "caldereta", "pinakbet",
+    # nutrition
+    "nutrition", "nutrient", "calorie", "calories", "protein", "carb", "carbs",
+    "fat", "fiber", "sodium", "salt", "sugar", "cholesterol", "vitamin",
+    # health & body
+    "health", "healthy", "healthier", "diet", "weight", "lose", "gain",
+    "blood pressure", "hypertension", "diabetes", "blood sugar",
+    "heart", "kidney", "allergy", "allergic", "uric acid", "gout",
+    # fitness & goals
+    "gym", "workout", "exercise", "fitness", "cutting", "bulking", "lean",
+    "muscle", "body fat", "macro", "macros",
+    # portions & frequency
+    "portion", "serving", "cup", "how much", "how often", "everyday",
+    "every day", "daily", "often", "araw-araw", "pang-araw-araw",
+    # cooking & alternatives
+    "cook", "cooking", "recipe", "ingredient", "swap", "alternative",
+    "better", "version", "pair", "sides", "remove",
+    # filipino food words
+    "masarap", "maalat", "matamis", "mantika", "matabang", "malusog",
+    "kain", "pagkain", "luto", "lutuin", "bantayan",
 }
 
-DEFAULT_ADVISORY = {
-    "Nutritional Profile": "This dish can fit into a balanced diet depending on preparation and portion size.",
-    "Health Risk": "The main concern is how often you eat it, how much you eat, and whether it is high in salt, sugar, or oil.",
-    "Recommendation": "Balance it with vegetables, water, and a sensible portion of rice or other carbs.",
-    "Healthier Alternative": "Choose grilled, steamed, broth-based, or vegetable-rich versions when possible.",
-    "Health Score": "6/10",
-}
 
-HIGH_RISK_TERMS = ("lechon", "kawali", "sisig", "chicharon", "longganisa", "tocino", "fried")
-MODERATE_TERMS = ("rice", "pancit", "adobo", "caldereta", "menudo", "lumpia")
-BETTER_TERMS = ("fish", "bangus", "tinola", "sinigang", "vegetable", "pinakbet", "monggo")
-
-
-def get_quick_advisory(dish_name: str) -> dict:
-    dish = dish_name.lower()
-    if any(term in dish for term in HIGH_RISK_TERMS):
-        return {
-            "Nutritional Profile": f"{dish_name} is usually satisfying and flavorful, but it can be higher in fat, sodium, or calories depending on how it is cooked.",
-            "Health Risk": "Large or frequent servings can make it harder to manage blood pressure, cholesterol, and weight goals.",
-            "Recommendation": "Keep the serving modest and balance it with vegetables, water, and a reasonable amount of plain rice.",
-            "Healthier Alternative": "Try a grilled, baked, air-fried, or less oily version with more vegetables on the side.",
-            "Health Score": "5/10",
-        }
-    if any(term in dish for term in BETTER_TERMS):
-        return {
-            "Nutritional Profile": f"{dish_name} can provide protein and helpful nutrients, especially when prepared with vegetables or sabaw.",
-            "Health Risk": "The main thing to watch is added salt, oily preparation, or eating it with too much rice.",
-            "Recommendation": "This can be a good choice when the portion is balanced and the salt is controlled.",
-            "Healthier Alternative": "Use less salt, add more vegetables, and choose grilled, steamed, or broth-based preparation when possible.",
-            "Health Score": "7/10",
-        }
-    if any(term in dish for term in MODERATE_TERMS):
-        return {
-            "Nutritional Profile": f"{dish_name} is filling and energy-dense, so the health impact depends on ingredients, sauce, and portion size.",
-            "Health Risk": "Too much refined carbohydrate, fatty meat, or salty sauce can make the meal heavier than it looks.",
-            "Recommendation": "Balance it with lean protein, vegetables, and a mindful rice portion.",
-            "Healthier Alternative": "Choose brown rice, leaner protein, extra vegetables, or a smaller serving.",
-            "Health Score": "6/10",
-        }
-
-    advisory = DEFAULT_ADVISORY.copy()
-
-    if any(term in dish for term in HIGH_RISK_TERMS):
-        advisory.update({
-            "Nutritional Profile": f"Ang {dish_name} ay masarap at filling, pero medyo mataas sa fat, salt, o calories — yung tipong ulam na all-in.",
-            "Health Risk": "Pag madalas at malaking serving, pwedeng mag-strain sa puso, blood pressure, at weight mo.",
-            "Recommendation": "Gawin mong treat, hindi everyday ulam. Pag kumain ka nito, i-pair mo ng maraming gulay at tubig.",
-            "Healthier Alternative": "Try mo yung grilled o air-fried version, o kaya bawasan ang sauce at mantika.",
-            "Health Score": "5/10",
-        })
-    elif any(term in dish for term in BETTER_TERMS):
-        advisory.update({
-            "Nutritional Profile": f"Ang {dish_name} ay isa sa mas healthy na pagpipilian — may protein at nutrients, lalo na pag may sabaw o gulay.",
-            "Health Risk": "Ang usual na problema ay yung sobrang alat ng sauce o pag fried ang preparation. Minsan yung dami ng kanin pa.",
-            "Recommendation": "Ituloy mo lang — basta bantayan mo yung salt at i-balance ng gulay.",
-            "Healthier Alternative": "Keep it simple — less salt, mas maraming gulay, at grilled o steamed kung pwede.",
-            "Health Score": "7/10",
-        })
-    elif any(term in dish for term in MODERATE_TERMS):
-        advisory.update({
-            "Nutritional Profile": f"Ang {dish_name} ay filling at energy-dense — depende sa ingredients at kung paano niluto.",
-            "Health Risk": "Pag sobra yung sauce, fatty meat, o malaking kanin, medyo heavy na siya sa katawan.",
-            "Recommendation": "I-balance mo ng lean protein at gulay, at huwag mag-overdose sa rice.",
-            "Healthier Alternative": "Brown rice, mas manipis na karne, dagdag gulay — ganun.",
-            "Health Score": "6/10",
-        })
-
-    return advisory
+def is_nutrition_intent(text: str) -> bool:
+    """Does this message actually sound like it's about food or health?"""
+    normalized = normalize_text(text)
+    words = set(re.findall(r"[a-z\-]+", normalized))
+    if words & _NUTRITION_TERMS:
+        return True
+    for term in _NUTRITION_TERMS:
+        if " " in term and term in normalized:
+            return True
+    return False
 
 
-def get_health_advisory(dish_name: str) -> dict:
-    prompt = f"""Ikaw si Yobab, isang friendly Filipino nutrition assistant na nagsasalita ng natural Taglish.
+def previous_conversation_was_about_food(messages: list[dict]) -> bool:
+    """Checks if we were already talking about food recently."""
+    food_signal = re.compile(
+        r"(meal|ulam|rice|kanin|gulay|sabaw|sodium|portion|fried|"
+        r"grilled|chicken|pork|fish|oil|calorie|protein|health|"
+        r"nutrition|diet|vegetable|score|gravy|sawsawan)",
+        re.IGNORECASE,
+    )
+    for msg in reversed(messages[-6:]):
+        if msg.get("role") == "assistant" and food_signal.search(msg.get("content", "")):
+            return True
+    return False
 
-Gumawa ka ng maikling health advisory para sa dish na ito: {dish_name}
 
-Sagutin mo sa EXACTLY nitong format, wala nang iba:
-Nutritional Profile: [1 sentence in natural Taglish]
-Health Risk: [1 sentence in natural Taglish — honest pero hindi pananakot]
-Recommendation: [1 practical sentence in Taglish — something they can actually do]
-Healthier Alternative: [1 sentence in Taglish — specific, not generic]
-Health Score: [number from 1-10]/10
-Yobab Says: [2-3 sentences in Taglish — warm, conversational, parang friend mo na nutrition assistant ang nagsasalita. May personality, hindi boring.]"""
+def build_meal_context(meal_data: dict | None) -> str:
+    """Preps a summary of the detected dish for the AI's prompt."""
+    if not meal_data:
+        return "No specific meal detected yet."
 
-    prompt = f"""You are Yobab, a friendly Filipino nutrition assistant.
-Create a short advisory for this detected dish: {dish_name}
+    food_name = meal_data.get("food_name", "Unknown dish")
+    confidence = meal_data.get("confidence", 0)
+    health_score = meal_data.get("health_score", "N/A")
+    health_label = meal_data.get("health_label", "")
 
-Use mostly clear English with only light Filipino words when natural.
-Do not force Tagalog and do not make jokes.
+    lines = [f"Detected food: {food_name}"]
+    if confidence:
+        lines.append(f"Confidence: {confidence}%")
+    if health_score:
+        lines.append(f"Health score: {health_score}")
+    if health_label:
+        lines.append(f"Health label: {health_label}")
 
-Respond in exactly this format and nothing else:
-Nutritional Profile: [1 clear sentence]
-Health Risk: [1 honest but calm sentence]
-Recommendation: [1 practical sentence]
-Healthier Alternative: [1 specific sentence]
-Health Score: [number from 1-10]/10
-Yobab Says: [2-3 natural sentences, mostly English, like a kind nutrition assistant talking]"""
+    knowledge = FOOD_KNOWLEDGE.get(food_name.lower(), {})
+    if knowledge:
+        lines.append(f"Category: {knowledge.get('category', 'unknown')}")
+        lines.append(f"Risks to watch: {', '.join(knowledge.get('risks', []))}")
+        lines.append(f"Pair with: {', '.join(knowledge.get('pair_with', []))}")
+        lines.append(f"Better choices: {', '.join(knowledge.get('better_choice', []))}")
+        if knowledge.get("notes"):
+            lines.append(f"Notes: {knowledge['notes']}")
 
-    try:
-        response = ollama.chat(
-            model=MODEL_NAME,
-            messages=[{"role": "user", "content": prompt}]
+    advice = meal_data.get("advice", {})
+    if advice:
+        if advice.get("watch"):
+            lines.append(f"Watch: {advice['watch']}")
+        if advice.get("pair_with"):
+            lines.append(f"Pair with: {advice['pair_with']}")
+        if advice.get("better_choice"):
+            lines.append(f"Better choice: {advice['better_choice']}")
+
+    return "\n".join(lines)
+
+
+def get_yobab_reply(
+    user_message: str,
+    messages: list[dict],
+    meal_context: dict | None = None,
+) -> str:
+    """Entry point for the chatbot logic."""
+    normalized = normalize_text(user_message)
+    has_food_history = previous_conversation_was_about_food(messages)
+
+    # Let follow-ups through if we've been talking about food
+    if is_short_follow_up(normalized) and has_food_history:
+        pass
+    elif is_clearly_unrelated(user_message):
+        return (
+            "I'm here for ulam and nutrition questions only. "
+            "Ask me about this meal, portions, rice, health risks, "
+            "fitness goals, or healthier swaps."
         )
-    except Exception:
-        return get_quick_advisory(dish_name)
+    elif is_nutrition_intent(user_message):
+        pass
+    elif has_food_history:
+        pass
+    elif len(normalized.split()) > 6:
+        return (
+            "I'm here for ulam and nutrition questions only. "
+            "Ask me about this meal, portions, rice, health risks, "
+            "fitness goals, or healthier swaps."
+        )
 
-    text = response["message"]["content"]
-    result = get_quick_advisory(dish_name)
-    for line in text.strip().split("\n"):
-        if ":" in line:
-            key, value = line.split(":", 1)
-            result[key.strip()] = value.strip()
+    context_str = build_meal_context(meal_context)
+    prompt_payload = _build_prompt_payload(user_message, messages, context_str)
 
-    return result
+    # Try AI, fall back to hardcoded if it fails
+    ai_reply = call_yobab_ai(prompt_payload)
+    if ai_reply:
+        return ai_reply
+
+    return _fallback_reply(user_message, messages, meal_context)
 
 
-def stream_nutrition_reply(dish_name: str, question: str = "", history_json: str = ""):
-    if _is_out_of_scope(question, dish_name, history_json):
-        fallback = _fallback_nutri_reply(dish_name, question, history_json)
-        for word in fallback.split(" "):
-            yield word + " "
-        return
+def _fallback_reply(
+    user_message: str,
+    messages: list[dict],
+    meal_context: dict | None,
+) -> str:
+    """The safety net for when the AI is down or offline."""
+    normalized = normalize_text(user_message)
+    dish = (meal_context or {}).get("food_name", "this dish")
+    knowledge = FOOD_KNOWLEDGE.get(dish.lower(), {})
 
-    topic = question.strip() or (
-        f"Mag-start ka ng natural na advisory para sa {dish_name}. "
-        "Sabihin mo kung ano yung nutritional value nito, yung dapat bantayan, "
-        "isang practical na tip sa pagkain, at isang simpleng health score. "
-        "Mag-usap ka parang kausap mo yung friend mo — hindi lecture, real talk lang."
+    if any(t in normalized for t in ("are you sure", "sure", "really", "confirm", "is that true")):
+        return (
+            f"Yes — for general guidance, that advice still fits {dish}. "
+            "It's not a ban, just a smarter plate setup. "
+            "Pair with gulay or sabaw, keep rice moderate, and drink water."
+        )
+
+    if normalized in ("why", "why?", "how come", "explain", "what do you mean"):
+        return (
+            f"Because {dish} can be heavy on oil, sodium, or fat depending on how it's cooked. "
+            "Balancing it with gulay, sabaw, and moderate kanin helps your body handle the meal better."
+        )
+
+    if "gravy" in normalized or "sawsawan" in normalized or "sauce" in normalized:
+        return (
+            f"Gravy and sawsawan add extra sodium and calories on top of {dish}. "
+            "Try a squeeze of calamansi instead for a lighter flavor kick."
+        )
+
+    if "rice" in normalized or "kanin" in normalized or "cup" in normalized:
+        return (
+            f"Around 1 cup of plain rice is a good guide with {dish}. "
+            "Keeping the carb portion steady helps avoid that heavy food coma feeling."
+        )
+
+    if any(t in normalized for t in ("gym", "workout", "cutting", "bulking", "fitness", "muscle", "lean")):
+        if knowledge.get("score", 5) >= 7:
+            return (
+                f"{dish} is a decent choice for active people — it's good protein. "
+                "Just pair it with extra gulay for fiber."
+            )
+        return (
+            f"{dish} is okay occasionally, but for gym days you usually want more protein and less oil. "
+            "Try a grilled version if you can."
+        )
+
+    if any(t in normalized for t in ("hypertension", "blood pressure", "diabetes", "blood sugar", "uric", "gout")):
+        return (
+            f"If you're watching your health, be extra mindful with {dish}. "
+            "Keep the portion small and skip the salty sauces. "
+            "Always a good idea to check with your doctor for specific advice."
+        )
+
+    if any(t in normalized for t in ("swap", "healthier", "better", "alternative")):
+        choices = knowledge.get("better_choice", ["grilled or steamed version"])
+        return (
+            f"Try {', '.join(choices)} instead. "
+            "Tastes great but with less oil and salt."
+        )
+
+    if any(t in normalized for t in ("often", "everyday", "every day", "daily", "araw")):
+        score = knowledge.get("score", 5)
+        if score >= 7:
+            return f"{dish} is light enough to have regularly, just don't forget your veggies."
+        return (
+            f"{dish} is best as an occasional treat, not an everyday thing. "
+            "Balance is key."
+        )
+
+    if any(t in normalized for t in ("pair", "side", "with", "kasama")):
+        pairs = knowledge.get("pair_with", ["gulay", "sabaw", "water", "1 cup rice"])
+        return f"Best to pair {dish} with {', '.join(pairs)}. Makes for a much more balanced plate."
+
+    if "skin" in normalized or "remove" in normalized:
+        return (
+            f"Removing the skin from {dish} cuts out a lot of extra oil and salt. "
+            "It's an easy win for your health."
+        )
+
+    risks = knowledge.get("risks", ["oil", "sodium", "large portions"])
+    pairs = knowledge.get("pair_with", ["gulay", "sabaw", "water", "moderate rice"])
+    return (
+        f"{dish} can be enjoyed, just watch the {', '.join(risks)}. "
+        f"Try pairing it with {', '.join(pairs)}."
     )
 
-    if not question.strip():
-        topic = (
-            f"Start with a natural advisory for {dish_name}. "
-            "Explain what to watch nutritionally, give one practical eating tip, "
-            "suggest one healthier way to enjoy it, and include a simple health score naturally in a sentence. "
-            "Use mostly English with only light Filipino words if they sound natural."
-        )
 
-    messages = _build_chat_messages(dish_name, topic, history_json)
-
+def call_yobab_ai(prompt_payload: list[dict]) -> str | None:
+    """Talks to the actual AI model (Ollama)."""
     try:
-        stream = ollama.chat(
-            model=MODEL_NAME,
-            messages=messages,
-            stream=True,
-        )
+        response = ollama.chat(model=MODEL_NAME, messages=prompt_payload)
+        return response["message"]["content"].strip()
+    except Exception:
+        return None
+
+
+def call_yobab_ai_stream(prompt_payload: list[dict]):
+    """Same as above but streams the response chunk by chunk."""
+    try:
+        stream = ollama.chat(model=MODEL_NAME, messages=prompt_payload, stream=True)
         for chunk in stream:
             content = chunk.get("message", {}).get("content", "")
             if content:
                 yield content
     except Exception:
-        fallback = _fallback_nutri_reply(dish_name, question, history_json)
+        return
+
+
+def _build_prompt_payload(
+    user_message: str,
+    history: list[dict],
+    meal_context_str: str,
+) -> list[dict]:
+    """Wraps everything up for the AI to understand the current situation."""
+    messages = [
+        {"role": "system", "content": YOBAB_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                f"[MEAL CONTEXT]\n{meal_context_str}\n\n"
+                "Keep every answer focused on this meal, food, nutrition, "
+                "portions, cooking choices, fitness goals, and healthy eating. "
+                "Treat short follow-ups as referring to the meal and your previous answer."
+            ),
+        },
+        {
+            "role": "assistant",
+            "content": "Understood. I'll focus on this meal and nutrition guidance.",
+        },
+    ]
+
+    for item in history[-MAX_HISTORY_MESSAGES:]:
+        role = item.get("role")
+        content = str(item.get("content", "")).strip()
+        if role in ("user", "assistant") and content:
+            messages.append({"role": role, "content": content[:1200]})
+
+    messages.append({"role": "user", "content": user_message})
+    return messages
+
+
+def stream_nutrition_reply(dish_name: str, question: str = "", history_json: str = ""):
+    """The main streaming handler for the API."""
+    history = _parse_history(history_json)
+
+    meal_context = {
+        "food_name": dish_name,
+        "confidence": None,
+        "health_score": None,
+        "health_label": None,
+    }
+
+    # If the user didn't ask anything, give them a general summary
+    if not question.strip():
+        question = (
+            f"Give a natural, short advisory for {dish_name}. "
+            "Mention what to watch nutritionally, one practical eating tip, "
+            "a healthier way to enjoy it, and a simple health score woven into a sentence. "
+            "Use simple English with light Filipino food words."
+        )
+
+    normalized = normalize_text(question)
+    has_food_history = previous_conversation_was_about_food(history)
+
+    is_followup = is_short_follow_up(normalized) and has_food_history
+    has_intent = is_nutrition_intent(question)
+    is_unrelated = is_clearly_unrelated(question)
+
+    if is_unrelated and not is_followup and not has_intent and not has_food_history:
+        fallback = (
+            "I'm here for ulam and nutrition questions only. "
+            "Ask me about this meal, portions, rice, health risks, "
+            "fitness goals, or healthier swaps."
+        )
+        for word in fallback.split(" "):
+            yield word + " "
+        return
+
+    context_str = build_meal_context(meal_context)
+    prompt_payload = _build_prompt_payload(question, history, context_str)
+
+    streamed_any = False
+    for chunk in call_yobab_ai_stream(prompt_payload):
+        streamed_any = True
+        yield chunk
+
+    if not streamed_any:
+        fallback = _fallback_reply(question, history, meal_context)
         for word in fallback.split(" "):
             yield word + " "
 
 
-def _build_chat_messages(dish_name: str, topic: str, history_json: str) -> list[dict[str, str]]:
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": (
-                f"Detected dish from the photo: {dish_name}. "
-                "Keep every answer focused on food, nutrition, portions, cooking choices, and healthy eating. "
-                "If the user asks a short follow-up such as 'why?', use the previous assistant answer as context."
-            ),
-        },
-    ]
-
-    for item in _parse_history(history_json):
-        messages.append(item)
-
-    messages.append({"role": "user", "content": topic})
-    return messages
-
-
-def _parse_history(history_json: str) -> list[dict[str, str]]:
+def _parse_history(history_json: str) -> list[dict]:
+    """Helper to turn the JSON history into a Python list."""
     if not history_json:
         return []
     try:
-        raw_history = json.loads(history_json)
+        raw = json.loads(history_json)
     except json.JSONDecodeError:
         return []
-
     parsed = []
-    for item in raw_history[-MAX_HISTORY_MESSAGES:]:
+    for item in raw[-MAX_HISTORY_MESSAGES:]:
         role = item.get("role")
         content = str(item.get("content", "")).strip()
-        if role not in {"user", "assistant"} or not content:
-            continue
-        parsed.append({"role": role, "content": content[:1200]})
+        if role in ("user", "assistant") and content:
+            parsed.append({"role": role, "content": content[:1200]})
     return parsed
 
 
-def _is_out_of_scope(question: str, dish_name: str, history_json: str = "") -> bool:
-    ask = question.lower().strip()
-    if not ask:
-        return False
+# Old functions kept so the /analyze endpoint doesn't break
+HIGH_RISK_TERMS = ("lechon", "kawali", "sisig", "chicharon", "longganisa", "tocino", "fried")
+MODERATE_TERMS = ("rice", "pancit", "adobo", "caldereta", "menudo", "lumpia")
+BETTER_TERMS = ("fish", "bangus", "tinola", "sinigang", "vegetable", "pinakbet", "monggo")
 
-    follow_up_terms = (
-        "why", "why?", "why not", "how come", "what do you mean", "explain",
-        "explain more", "what about", "is that bad", "can i eat more",
-        "how often", "every day", "everyday", "why 1 cup", "why avoid",
-        "skin", "gravy", "sawsawan", "rice", "are you sure", "sure",
-        "really", "is that true", "can you confirm", "confirm"
-    )
-    has_meal_history = any(
-        item.get("role") == "assistant" and str(item.get("content", "")).strip()
-        for item in _parse_history(history_json)
-    )
-    if has_meal_history and any(term in ask for term in follow_up_terms):
-        return False
-
-    food_terms = (
-        "food", "eat", "meal", "dish", "nutrition", "nutrient", "healthy", "health", "diet",
-        "calorie", "protein", "carb", "fat", "fiber", "rice", "sodium", "salt", "sugar",
-        "hypertension", "blood pressure", "diabetes", "cholesterol", "portion", "serving",
-        "cook", "fried", "grilled", "ingredient", "healthier", "version", "often", "safe",
-        "allergy", "allergic", "weight", "heart", "kidney", "vegetable", "fruit", "meat",
-        "fish", "breakfast", "lunch", "dinner", "snack", "pair", "side", "sides", "sauce",
-        "ulam", "gulay", "kanin", "masustansya", "matabang", "mapakla", "matamis", "alat",
-        "kain", "pagkain", "lutuin", "luto", "healthy", "diet", "sakit", "malusog"
-    )
-    dish_terms = tuple(part for part in dish_name.lower().replace("-", " ").split() if len(part) > 2)
-    return not any(term in ask for term in food_terms + dish_terms)
-
-
-def _fallback_nutri_reply(dish_name: str, question: str = "", history_json: str = "") -> str:
-    advisory = get_quick_advisory(dish_name)
-    score = advisory.get("Health Score", "6/10")
-    ask = question.lower()
-
-    if _is_out_of_scope(question, dish_name, history_json):
-        return (
-            "I can help with ulam and nutrition questions only. "
-            f"If you want, ask me how {dish_name} affects blood pressure, portions, sugar, cholesterol, or healthier cooking choices."
-        )
-
-    if any(term in ask for term in ("are you sure", "sure", "really", "is that true", "confirm")):
-        return (
-            f"Yes, for general guidance, that advice still fits {dish_name}. "
-            "Because it can be oily and salty, pairing it with gulay or sabaw, water, and moderate rice helps balance the meal. "
-            "It is not a ban, just a smarter plate setup."
-        )
-
-    if "hypertension" in ask or "blood pressure" in ask:
-        return (
-            f"If you have hypertension, be careful with {dish_name}, especially if it is salty, fried, or served with sauce. "
-            "The main thing to watch is sodium because it can affect blood pressure. "
-            "Keep the portion modest, drink water, and pair it with gulay or soup instead of extra salty sides. "
-            "If your doctor gave you a strict sodium limit, treat this as an occasional food, not an araw-araw meal."
-        )
-
-    if "healthier" in ask or "version" in ask:
-        return (
-            f"You can make {dish_name} healthier without removing the comfort-food feeling. "
-            "Use less oil, choose leaner protein when possible, and add vegetables for fiber. "
-            "Keep the rice portion reasonable so the whole plate does not become too heavy. "
-            "That keeps it masarap, but more balanced."
-        )
-
-    if "how often" in ask or "gaano kadalas" in ask:
-        return (
-            f"For {dish_name}, I would use the health score as a guide: around {score}. "
-            "If it is high in fat, sodium, or sugar, enjoy it occasionally rather than every day. "
-            "What matters most is your overall pattern across the week, not one single meal. "
-            "Balance heavier foods with lighter meals, vegetables, and enough water."
-        )
-
-    return (
-        f"{dish_name} can be enjoyable, but the portion and cooking style matter a lot. "
-        f"{advisory['Recommendation']} "
-        f"The main thing to watch is this: {advisory['Health Risk']} "
-        f"A lighter option would be: {advisory['Healthier Alternative']} "
-        f"I would rate it around {score}, so enjoy it with balance, not guilt."
-    )
-
-    if _is_out_of_scope(question, dish_name):
-        return (
-            f"Haha, yun ay medyo labas na sa aking expertise ha. "
-            f"Ako si Nutri, kaya food and health lang ang alam ko. "
-            f"Kung gusto mo, tanungin mo ako tungkol sa {dish_name} — "
-            "like kung pano siya sa blood pressure, gaano kadalas pwedeng kainin, o kung may healthier version ba."
-        )
-
-    if "hypertension" in ask or "blood pressure" in ask:
-        return (
-            f"Para sa may hypertension, kailangan mag-ingat sa {dish_name} — "
-            "yung sodium ang pinaka-concern dito, kasama na yung sauces at salty sides. "
-            "Pag kumain ka nito, gawin mong maliit lang ang serving, uminom ng maraming tubig, "
-            "at i-pair mo ng gulay para may balance. "
-            "Kung may strict sodium limit ka galing sa doktor mo, treat lang ito — hindi everyday ulam."
-        )
-
-    if "healthier" in ask or "version" in ask:
-        return (
-            f"Pwede naman gawing mas healthy ang {dish_name} without losing yung Filipino comfort food feeling. "
-            "Bawasan ang mantika, pumili ng leaner protein pag pwede, at dagdagan ng gulay para may fiber. "
-            "I-keep din ang kanin sa tamang dami para hindi maging too heavy ang buong plate. "
-            "Ganun — mula sa occasional treat, maaari siyang maging mas regular na pagkain."
-        )
-
-    if "how often" in ask or "gaano kadalas" in ask:
-        return (
-            f"Para sa {dish_name}, tingnan mo yung health score niya na {score}. "
-            "Kung mataas sa fat o salt, gawin mong occasional — hindi linggu-linggo, lalo na hindi araw-araw. "
-            "Mas maganda kung i-balance mo ng mas magaan na meals bago at pagkatapos. "
-            "Yung pattern mo sa buong linggo ang mas mahalaga kaysa isang kain lang."
-        )
-
-    return (
-        f"Ay, {dish_name}! Isa yan sa mga classic. "
-        f"{advisory['Recommendation']} "
-        f"Yung dapat mong bantayan ay ito — {advisory['Health Risk']} "
-        f"Kung gusto mo ng mas magaan na version, {advisory['Healthier Alternative']} "
-        f"Sa overall, binibigyan ko ito ng {score} — enjoy mo, pero with intention ha."
-    )
-
-
-if __name__ == "__main__":
-    result = get_health_advisory("Lechon Kawali")
-    for key, value in result.items():
-        print(f"{key}: {value}")
+def get_quick_advisory(dish_name: str) -> dict:
+    """Basic rule-based logic for a fast response."""
+    dish = dish_name.lower()
+    if any(term in dish for term in HIGH_RISK_TERMS):
+        return {
+            "Nutritional Profile": f"{dish_name} is satisfying but can be higher in fat, sodium, or calories.",
+            "Health Risk": "Large or frequent servings can affect blood pressure, cholesterol, and weight.",
+            "Recommendation": "Keep the serving modest and balance with gulay, sabaw, water, and moderate rice.",
+            "Healthier Alternative": "Try grilled, baked, air-fried, or less oily version with more vegetables.",
+            "Health Score": "5/10",
+        }
+    if any(term in dish for term in BETTER_TERMS):
+        return {
+            "Nutritional Profile": f"{dish_name} provides protein and nutrients, especially with vegetables or sabaw.",
+            "Health Risk": "Watch added salt, oily preparation, or too much rice on the side.",
+            "Recommendation": "A good choice when portion is balanced and salt is controlled.",
+            "Healthier Alternative": "Use less salt, add more vegetables, and choose steamed or broth-based preparation.",
+            "Health Score": "7/10",
+        }
+    if any(term in dish for term in MODERATE_TERMS):
+        return {
+            "Nutritional Profile": f"{dish_name} is filling and energy-dense — depends on ingredients and cooking.",
+            "Health Risk": "Too much sauce, fatty meat, or large rice portion can make it heavier than it looks.",
+            "Recommendation": "Balance with lean protein, vegetables, and mindful rice portion.",
+            "Healthier Alternative": "Choose brown rice, leaner protein, extra vegetables, or a smaller serving.",
+            "Health Score": "6/10",
+        }
+    return {
+        "Nutritional Profile": "This dish can fit a balanced diet depending on preparation and portion size.",
+        "Health Risk": "Main concern is frequency, portion, and salt/sugar/oil content.",
+        "Recommendation": "Balance with vegetables, water, and a sensible portion of rice.",
+        "Healthier Alternative": "Choose grilled, steamed, broth-based, or vegetable-rich versions.",
+        "Health Score": "6/10",
+    }

@@ -3,10 +3,11 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from ultralytics import YOLO
-from nlp import get_quick_advisory, stream_nutrition_reply
+from nlp import get_quick_advisory, stream_nutrition_reply, get_yobab_reply
 import shutil
 import os
 import uuid
+import json
 
 app = FastAPI()
 
@@ -64,10 +65,41 @@ async def advisor_stream(
     question: str = Form(""),
     history: str = Form("")
 ):
+    # This one handles the real-time chat streaming
     return StreamingResponse(
         stream_nutrition_reply(dish, question, history),
         media_type="text/plain; charset=utf-8",
     )
+
+
+@app.post("/advisor/reply")
+async def advisor_reply(
+    dish: str = Form(...),
+    question: str = Form(""),
+    history: str = Form(""),
+    meal_context: str = Form(""),
+):
+    # Just a regular POST in case we don't need streaming
+    parsed_history = []
+    if history:
+        try:
+            parsed_history = json.loads(history)
+        except json.JSONDecodeError:
+            parsed_history = []
+
+    parsed_meal = None
+    if meal_context:
+        try:
+            parsed_meal = json.loads(meal_context)
+        except json.JSONDecodeError:
+            parsed_meal = None
+
+    # If we don't have full meal data, just use the name
+    if not parsed_meal:
+        parsed_meal = {"food_name": dish}
+
+    reply = get_yobab_reply(question, parsed_history, parsed_meal)
+    return {"reply": reply}
 
 
 app.mount("/static", StaticFiles(directory="."), name="static")
