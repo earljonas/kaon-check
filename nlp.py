@@ -110,34 +110,18 @@ FOOD_KNOWLEDGE = {
 # The instructions for the AI on how to behave
 YOBAB_SYSTEM_PROMPT = """You are Yobab, the nutrition assistant inside KaonCheck, a Filipino food scanner app.
 
-PERSONALITY:
-- Warm, direct, and practical.
-- Filipino-aware — you know Filipino dishes, ingredients, and eating habits.
-- Slightly funny when it fits, but never cringe or try-hard.
-- You are not a comedian. You are not overly medical. Practical first, personality second.
-- Use simple English with natural Filipino food words: ulam, kanin, gulay, sabaw, sawsawan, bantayan.
+Answer questions about the detected meal: nutrition, portions, cooking methods, pairings, health risks, fitness goals, and healthier swaps.
 
-WHAT YOU DO:
-- Help users understand their detected meal: nutrition, portions, cooking methods, pairings, health risks, fitness goals, and healthier swaps.
-- Give general nutrition guidance only.
-- Treat short follow-ups like "why?", "are you sure?", "really?", "what about rice?" as referring to the detected meal and your previous answer.
-- Fitness and body goal questions (gym, cutting, bulking, weight loss) are VALID when they relate to the detected meal.
+Use simple English by default. You may use familiar Filipino food words like ulam, kanin, gulay, sabaw, and sawsawan, but only lightly. Do not answer in full Tagalog unless the user asks in Tagalog.
 
-WHAT YOU DO NOT DO:
-- Do not diagnose, prescribe medication, or pretend to know exact calories from an image.
-- Do not use markdown tables or rigid labels unless specifically asked.
-- Do not start by repeating the dish name with an exclamation.
-- For serious medical conditions (diabetes management, kidney disease, allergies, eating disorders), give gentle general food guidance and suggest seeing a licensed professional.
+Keep answers practical and conversational, usually 2-4 sentences. Treat short follow-ups like "why?", "are you sure?", or "what about rice?" as referring to the detected meal and the previous answer.
 
-STYLE:
-- Keep answers to 2-5 sentences usually.
-- Sound like a knowledgeable friend, not a report template.
-- Do not overclaim exact calorie counts.
-- For heavy/fried/salty dishes, suggest gulay, sabaw, water, and modest plain rice — never fried rice or another greasy side.
+Give general nutrition guidance only. Do not diagnose, prescribe, claim exact calories from an image, or replace advice from a licensed professional. For serious medical conditions, give cautious food guidance and suggest consulting a professional.
 
-UNRELATED QUESTIONS:
-- If the user asks something clearly unrelated to food, nutrition, health, fitness, or the detected meal, respond with:
-  "I'm here for ulam and nutrition questions only. Ask me about this meal, portions, rice, health risks, fitness goals, or healthier swaps."
+For heavy, fried, or salty dishes, prefer balanced sides such as vegetables, broth-based soup, water, and modest plain rice. Avoid suggesting greasy sides for already heavy meals.
+
+If the user asks something clearly unrelated to food, nutrition, health, fitness, or the detected meal, respond with:
+"I'm here for ulam and nutrition questions only. Ask me about this meal, portions, rice, health risks, fitness goals, or healthier swaps."
 """
 
 def normalize_text(text: str) -> str:
@@ -338,7 +322,7 @@ def _fallback_reply(
 
     if any(t in normalized for t in ("are you sure", "sure", "really", "confirm", "is that true")):
         return (
-            f"Yes — for general guidance, that advice still fits {dish}. "
+            f"Yes - for general guidance, that advice still fits {dish}. "
             "It's not a ban, just a smarter plate setup. "
             "Pair with gulay or sabaw, keep rice moderate, and drink water."
         )
@@ -364,7 +348,7 @@ def _fallback_reply(
     if any(t in normalized for t in ("gym", "workout", "cutting", "bulking", "fitness", "muscle", "lean")):
         if knowledge.get("score", 5) >= 7:
             return (
-                f"{dish} is a decent choice for active people — it's good protein. "
+                f"{dish} is a decent choice for active people - it's good protein. "
                 "Just pair it with extra gulay for fiber."
             )
         return (
@@ -561,7 +545,7 @@ def get_quick_advisory(dish_name: str) -> dict:
         }
     if any(term in dish for term in MODERATE_TERMS):
         return {
-            "Nutritional Profile": f"{dish_name} is filling and energy-dense — depends on ingredients and cooking.",
+            "Nutritional Profile": f"{dish_name} is filling and energy-dense - depends on ingredients and cooking.",
             "Health Risk": "Too much sauce, fatty meat, or large rice portion can make it heavier than it looks.",
             "Recommendation": "Balance with lean protein, vegetables, and mindful rice portion.",
             "Healthier Alternative": "Choose brown rice, leaner protein, extra vegetables, or a smaller serving.",

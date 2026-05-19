@@ -258,42 +258,89 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (e) {
       liveScanFailures += 1;
       console.error("Live scan error:", e);
-      setCameraStatus(
-        liveScanFailures >= 2 ? 'Scanner cannot reach the server. Camera is still on.' : 'Scanning...',
-        liveScanFailures >= 2
-      );
+      if (liveScanFailures >= 3) {
+        if (scanInterval) {
+          clearInterval(scanInterval);
+          scanInterval = null;
+        }
+        liveScanningLaser.style.display = 'none';
+        liveScanningOverlay.style.display = 'none';
+        liveBoundingBoxContainer.innerHTML = '';
+        liveArOverlayContainer.innerHTML = '';
+        currentLiveDish = '';
+        setCameraStatus('Scanner cannot reach the server. Restart the backend, then reopen the camera scanner.', true);
+      } else {
+        setCameraStatus(
+          liveScanFailures >= 2 ? 'Scanner cannot reach the server. Retrying...' : 'Scanning...',
+          liveScanFailures >= 2
+        );
+      }
     } finally {
       isScanning = false;
     }
   }
 
-  function drawLiveBoundingBox(bbox) {
-    const videoWidth = cameraFeed.clientWidth;
-    const videoHeight = cameraFeed.clientHeight;
-    // Calculate aspect ratios to map bounding box correctly if object-fit: cover is used.
-    // For simplicity, assuming the video element dimensions match the aspect ratio of the feed.
-    const x1 = bbox[0] * videoWidth;
-    const y1 = bbox[1] * videoHeight;
-    const x2 = bbox[2] * videoWidth;
-    const y2 = bbox[3] * videoHeight;
+  function getObjectFitCoverRect(element, intrinsicWidth, intrinsicHeight) {
+    const clientWidth = element.clientWidth;
+    const clientHeight = element.clientHeight;
 
-    const width = x2 - x1;
-    const height = y2 - y1;
+    if (!clientWidth || !clientHeight || !intrinsicWidth || !intrinsicHeight) {
+      return { x: 0, y: 0, width: clientWidth, height: clientHeight };
+    }
+
+    const scale = Math.max(clientWidth / intrinsicWidth, clientHeight / intrinsicHeight);
+    const width = intrinsicWidth * scale;
+    const height = intrinsicHeight * scale;
+
+    return {
+      x: (clientWidth - width) / 2,
+      y: (clientHeight - height) / 2,
+      width,
+      height
+    };
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+  }
+
+  function getBoundingBoxRect(bbox, element, intrinsicWidth, intrinsicHeight) {
+    const rendered = getObjectFitCoverRect(element, intrinsicWidth, intrinsicHeight);
+    const rawX1 = rendered.x + bbox[0] * rendered.width;
+    const rawY1 = rendered.y + bbox[1] * rendered.height;
+    const rawX2 = rendered.x + bbox[2] * rendered.width;
+    const rawY2 = rendered.y + bbox[3] * rendered.height;
+    const x1 = clamp(rawX1, 0, element.clientWidth);
+    const y1 = clamp(rawY1, 0, element.clientHeight);
+    const x2 = clamp(rawX2, 0, element.clientWidth);
+    const y2 = clamp(rawY2, 0, element.clientHeight);
+
+    return {
+      x: x1,
+      y: y1,
+      width: Math.max(x2 - x1, 0),
+      height: Math.max(y2 - y1, 0)
+    };
+  }
+
+  function drawLiveBoundingBox(bbox) {
+    const rect = getBoundingBoxRect(bbox, cameraFeed, cameraFeed.videoWidth, cameraFeed.videoHeight);
+    if (!rect.width || !rect.height) return;
 
     const box = document.createElement('div');
     box.className = 'live-bounding-box';
-    box.style.left = `${x1}px`;
-    box.style.top = `${y1}px`;
-    box.style.width = `${width}px`;
-    box.style.height = `${height}px`;
+    box.style.left = `${rect.x}px`;
+    box.style.top = `${rect.y}px`;
+    box.style.width = `${rect.width}px`;
+    box.style.height = `${rect.height}px`;
 
     liveBoundingBoxContainer.appendChild(box);
   }
 
   function renderArFloatingCard(det) {
-    const advisory = det.advisory;
+    const advisory = det.advisory || {};
     const scoreText = advisory['Health Score'] || '5/10';
-    const scoreNum = parseInt(scoreText);
+    const scoreNum = Number.parseInt(scoreText, 10) || 5;
 
     let scoreColor = '#bf3f32';
     let scoreDesc = 'High Risk';
@@ -393,7 +440,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       console.error('Yobab stream error:', err);
       if (thinkingTarget) thinkingTarget.style.display = 'none';
-      target.textContent = `Yobab could not stream right now, but ${dish} is best handled with a modest portion, gulay or sabaw, and water. Avoid extra gravy or salty sawsawan.`;
+      target.textContent = 'Yobab cannot reach the server right now. Please make sure the backend is running.';
     } finally {
       target.classList.remove('is-streaming');
       if (question) {
@@ -467,9 +514,18 @@ document.addEventListener('DOMContentLoaded', () => {
     let answer = '';
     let hasStartedStreaming = false;
 
+    if (!mealContext) {
+      answer = 'Scan a meal first so Yobab has dish context.';
+      hooks.onStart?.();
+      await hooks.onToken?.(answer, answer);
+      messages.push({ role: 'assistant', content: answer });
+      hooks.onDone?.(answer);
+      return answer;
+    }
+
     try {
       const formData = new FormData();
-      formData.append('dish', mealContext?.foodName || 'Fried Chicken');
+      formData.append('dish', mealContext.foodName);
       formData.append('question', userMessage);
       formData.append('history', JSON.stringify(historyBeforeUserMessage));
 
@@ -492,8 +548,8 @@ document.addEventListener('DOMContentLoaded', () => {
         await hooks.onToken?.(chunk, answer);
       }
     } catch (error) {
-      console.error('Yobab stream failed, using local fallback:', error);
-      answer = getYobabReply(userMessage, historyBeforeUserMessage, mealContext);
+      console.error('Yobab stream failed:', error);
+      answer = 'Yobab cannot reach the server right now. Please make sure the backend is running.';
       hooks.onStart?.();
       await hooks.onToken?.(answer, answer);
     }
@@ -502,125 +558,6 @@ document.addEventListener('DOMContentLoaded', () => {
     messages.push({ role: 'assistant', content: answer });
     hooks.onDone?.(answer);
     return answer;
-  }
-
-  // Local fallback logic if the AI server is down
-  function getYobabReply(userMessage, messages, mealContext) {
-    const normalized = userMessage.toLowerCase();
-    const dish = mealContext?.foodName || 'Fried Chicken';
-
-    if (!isNutritionQuestion(normalized) && !isMealFollowUp(normalized, messages)) {
-      return 'I’m here for ulam and nutrition questions only. Ask me about Fried Chicken, portions, rice, sodium, diabetes, hypertension, or healthier swaps.';
-    }
-
-    if (isMealFollowUp(normalized, messages) && (
-      normalized === 'why' ||
-      normalized === 'why?' ||
-      normalized.includes('how come') ||
-      normalized.includes('explain') ||
-      normalized.includes('what do you mean') ||
-      normalized.includes('are you sure') ||
-      normalized === 'sure' ||
-      normalized.includes('really') ||
-      normalized.includes('is that true') ||
-      normalized.includes('confirm')
-    )) {
-      return `Yes, I’m sure about the general guidance. ${dish} tends to be heavier because of oil, sodium, and fried coating, so gulay, sabaw, water, and moderate kanin help balance the meal. It is not a ban, just a smarter plate setup.`;
-    }
-
-    if (normalized.includes('skin') || normalized.includes('remove')) {
-      return `Removing the skin helps reduce some oil and calories from ${dish}. Still bantayan the portion, because fried coating and sodium can still add up. Pair it with gulay or sabaw and keep the kanin reasonable.`;
-    }
-
-    if (normalized.includes('diabetes') || normalized.includes('blood sugar')) {
-      return `${dish} can fit sometimes, but watch the kanin more closely. Keep rice reasonable, add gulay or sabaw, and skip sweet drinks. Tiny plate math, big difference.`;
-    }
-
-    if (normalized.includes('hypertension') || normalized.includes('blood pressure') || normalized.includes('sodium') || normalized.includes('salt')) {
-      return `${dish} can be salty, especially with gravy or sawsawan. Keep the portion modest, choose water, and pair it with gulay or sabaw. Your blood pressure does not need extra drama.`;
-    }
-
-    if (normalized.includes('pair') || normalized.includes('with') || normalized.includes('rice') || normalized.includes('kanin')) {
-      return `Pair ${dish} with gulay or sabaw, water, and around 1 cup of rice. Go easy on gravy and salty sawsawan. Balanced plate, less food coma.`;
-    }
-
-    if (normalized.includes('often') || normalized.includes('everyday') || normalized.includes('every day') || normalized.includes('daily') || normalized.includes('araw')) {
-      return `${dish} is fine occasionally, but not pang-araw-araw. The main things to bantayan are oil, sodium, and portion size. Pair it with gulay or sabaw, keep rice reasonable, and skip extra gravy or salty sawsawan.`;
-    }
-
-    if (normalized.includes('swap') || normalized.includes('healthier') || normalized.includes('better')) {
-      return `A better choice would be inihaw, tinola, air-fried, or less oily manok. Keep the flavor, reduce the oil and sodium, and add gulay on the side. Still masarap, just less heavy.`;
-    }
-
-    return `${dish} is fine occasionally, but not pang-araw-araw. Watch oil, sodium, and portion size. Pair it with gulay or sabaw, keep rice reasonable, and skip extra gravy or salty sawsawan.`;
-  }
-
-  function isNutritionQuestion(text) {
-    return [
-      'ulam',
-      'nutrition',
-      'nutri',
-      'yobab',
-      'portion',
-      'rice',
-      'kanin',
-      'sodium',
-      'salt',
-      'diabetes',
-      'hypertension',
-      'blood pressure',
-      'blood sugar',
-      'health',
-      'healthy',
-      'healthier',
-      'swap',
-      'often',
-      'daily',
-      'everyday',
-      'araw',
-      'pair',
-      'gulay',
-      'sabaw',
-      'gravy',
-      'sawsawan',
-      'oil',
-      'fried',
-      'eat'
-    ].some((keyword) => text.includes(keyword));
-  }
-
-  function isMealFollowUp(text, history = messages) {
-    const compact = text.trim().replace(/\s+/g, ' ');
-    const followUps = [
-      'why',
-      'why?',
-      'why not',
-      'how come',
-      'what do you mean',
-      'explain',
-      'explain more',
-      'what about rice',
-      'what about gravy',
-      'what about removing the skin',
-      'is that bad',
-      'can i eat more',
-      'how often',
-      'what if every day',
-      'why 1 cup',
-      'why avoid sawsawan',
-      'are you sure',
-      'sure',
-      'really',
-      'is that true',
-      'can you confirm',
-      'confirm'
-    ];
-    const hasAssistantMealContext = history.some((message) => (
-      message.role === 'assistant' &&
-      /(meal|ulam|rice|kanin|gulay|sabaw|sodium|portion|fried|gravy|sawsawan|chicken)/i.test(message.content)
-    ));
-
-    return hasAssistantMealContext && followUps.some((term) => compact.includes(term));
   }
 
   function attachChatComposer(card, dish) {
@@ -787,46 +724,28 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function getSimpleExplanation(dish, advisory) {
-    const lowerDish = dish.toLowerCase();
-    if (lowerDish.includes('fried chicken')) {
-      return 'Fried chicken can be enjoyed occasionally, but it is likely higher in oil and sodium. Keep the portion modest and balance it with gulay, sabaw, water, and a reasonable amount of rice.';
-    }
-
-    return advisory['Recommendation'] || `${dish} can fit into a Filipino meal when the portion is reasonable. Balance the ulam with gulay, sabaw, water, and about 1 cup of rice.`;
+    return advisory['Nutritional Profile'] || advisory['Recommendation'] || `${dish} can fit into a Filipino meal when the portion is reasonable.`;
   }
 
-  function getSimpleAdvice(dish) {
-    const lowerDish = dish.toLowerCase();
-    const betterChoice = lowerDish.includes('chicken')
-      ? 'Inihaw, tinola, air-fried, or less oily manok'
-      : 'Inihaw, tinola, broth-based, steamed, or less oily versions';
-
+  function getSimpleAdvice(advisory = {}) {
     return [
-      ['Watch', 'Oil, sodium, and large portions'],
-      ['Pair with', 'Gulay, sabaw, water, and around 1 cup rice'],
-      ['Better choice', betterChoice]
+      ['Watch', advisory['Health Risk'] || 'Portion size and preparation method'],
+      ['Pair with', advisory['Recommendation'] || 'Water and a balanced side'],
+      ['Better choice', advisory['Healthier Alternative'] || 'Lighter cooking methods']
     ];
   }
 
   // Renders the box around detected items on the preview
   function drawBoundingBox(bbox, label) {
-    const imgWidth = preview.clientWidth;
-    const imgHeight = preview.clientHeight;
-
-    const x1 = bbox[0] * imgWidth;
-    const y1 = bbox[1] * imgHeight;
-    const x2 = bbox[2] * imgWidth;
-    const y2 = bbox[3] * imgHeight;
-
-    const width = x2 - x1;
-    const height = y2 - y1;
+    const rect = getBoundingBoxRect(bbox, preview, preview.naturalWidth, preview.naturalHeight);
+    if (!rect.width || !rect.height) return;
 
     const box = document.createElement('div');
     box.className = 'bounding-box';
-    box.style.left = `${x1}px`;
-    box.style.top = `${y1}px`;
-    box.style.width = `${width}px`;
-    box.style.height = `${height}px`;
+    box.style.left = `${rect.x}px`;
+    box.style.top = `${rect.y}px`;
+    box.style.width = `${rect.width}px`;
+    box.style.height = `${rect.height}px`;
 
     const labelEl = document.createElement('div');
     labelEl.className = 'bounding-box-label';
@@ -886,13 +805,13 @@ document.addEventListener('DOMContentLoaded', () => {
         healthScore: scoreText,
         healthLabel: scoreLabel,
         advice: {
-          watch: 'Oil, sodium, and large portions',
-          pairWith: 'Gulay, sabaw, water, and around 1 cup rice',
-          betterChoice: getSimpleAdvice(dishName)[2][1]
+          watch: advisory['Health Risk'] || '',
+          pairWith: advisory['Recommendation'] || '',
+          betterChoice: advisory['Healthier Alternative'] || ''
         }
       };
       resetYobabMemory();
-      const adviceRows = getSimpleAdvice(dishName)
+      const adviceRows = getSimpleAdvice(advisory)
         .map(([label, text]) => `
           <div class="advice-item">
             <strong>${label}</strong>
