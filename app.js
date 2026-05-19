@@ -39,6 +39,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const nutriChatForm = document.getElementById('nutriChatForm');
   const nutriChatInput = document.getElementById('nutriChatInput');
 
+  // Computer vision metrics modal
+  const metricsModal = document.getElementById('metricsModal');
+  const closeMetrics = document.getElementById('closeMetrics');
+  const metricsScanSummary = document.getElementById('metricsScanSummary');
+  const metricsDetectionDetails = document.getElementById('metricsDetectionDetails');
+  const metricsModelGrid = document.getElementById('metricsModelGrid');
+  const metricsFootnote = document.getElementById('metricsFootnote');
+  const metricsChartGrid = document.getElementById('metricsChartGrid');
+
   let currentFile = null;
   let stream = null;
   let scanInterval = null;
@@ -46,6 +55,8 @@ document.addEventListener('DOMContentLoaded', () => {
   let liveScanFailures = 0;
   let currentLiveDish = '';
   let mealContext = null;
+  let lastScanDetails = null;
+  let modelMetricsCache = null;
 
   // Store the conversation in memory for this session
   let messages = [
@@ -88,6 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
     fileInput.value = '';
     currentFile = null;
     mealContext = null;
+    lastScanDetails = null;
     resetYobabMemory();
     analyzeBtn.disabled = true;
   }
@@ -117,6 +129,7 @@ document.addEventListener('DOMContentLoaded', () => {
     resultsDiv.innerHTML = '';
     boundingBoxContainer.innerHTML = '';
     mealContext = null;
+    lastScanDetails = null;
     resetYobabMemory();
     window.speechSynthesis?.cancel();
   }
@@ -241,6 +254,18 @@ document.addEventListener('DOMContentLoaded', () => {
       if (data.detections && data.detections.length > 0) {
         // Just show the first thing we find to keep the screen clean
         const det = data.detections[0];
+        lastScanDetails = {
+          fileName: 'Live camera frame',
+          imageWidth: cameraFeed.videoWidth || 0,
+          imageHeight: cameraFeed.videoHeight || 0,
+          model: data.model || 'YOLO',
+          inferenceMs: data.inference_ms ?? 'N/A',
+          primaryDish: cleanFoodName(det.dish),
+          primaryConfidence: det.confidence,
+          healthScore: det.advisory?.['Health Score'] || 'N/A',
+          healthLabel: getScoreLabel(Number.parseInt(det.advisory?.['Health Score'], 10) || 5),
+          detections: data.detections
+        };
 
         if (det.bbox) {
           drawLiveBoundingBox(det.bbox);
@@ -370,12 +395,14 @@ document.addEventListener('DOMContentLoaded', () => {
         <div><span>Balance</span><i style="width:${Math.max(scoreNum * 10, 12)}%"></i></div>
         <div><span>Portion watch</span><i style="width:${Math.max((10 - scoreNum) * 10, 12)}%"></i></div>
       </div>
+      <button class="ar-details-btn" type="button">View scan details</button>
       <div class="ar-details">
         <p class="ar-thinking">Analyzing nutritional content of ${det.dish}...</p>
         <p class="ar-ai-copy"></p>
       </div>
     `;
     liveArOverlayContainer.appendChild(card);
+    card.querySelector('.ar-details-btn').addEventListener('click', openMetricsModal);
     streamYobabText(card.querySelector('.ar-ai-copy'), det.dish, '', null, card.querySelector('.ar-thinking'));
   }
 
@@ -613,6 +640,127 @@ document.addEventListener('DOMContentLoaded', () => {
     nutriChatModal.setAttribute('aria-hidden', 'true');
   }
 
+  function closeMetricsModal() {
+    metricsModal.classList.remove('open');
+    metricsModal.setAttribute('aria-hidden', 'true');
+  }
+
+  function escapeHtml(value = '') {
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function formatMetric(value, decimals = 1) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return 'N/A';
+    return `${(number * 100).toFixed(decimals)}%`;
+  }
+
+  function formatBoxValue(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return 'N/A';
+    return `${(number * 100).toFixed(1)}%`;
+  }
+
+  function metricCard(label, value, helper = '') {
+    return `
+      <div class="metric-card">
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(value)}</strong>
+        ${helper ? `<small>${escapeHtml(helper)}</small>` : ''}
+      </div>
+    `;
+  }
+
+  async function getModelMetrics() {
+    if (modelMetricsCache) return modelMetricsCache;
+    const res = await fetch(`${apiBaseUrl}/model-metrics`);
+    if (!res.ok) throw new Error(`Metrics request failed: ${res.status}`);
+    modelMetricsCache = await res.json();
+    return modelMetricsCache;
+  }
+
+  function renderScanMetrics() {
+    if (!lastScanDetails) return;
+
+    metricsScanSummary.innerHTML = [
+      metricCard('Primary result', lastScanDetails.primaryDish),
+      metricCard('Confidence', `${lastScanDetails.primaryConfidence}%`, 'This upload'),
+      metricCard('Detections', String(lastScanDetails.detections.length), 'Unique classes'),
+      metricCard('Inference time', `${lastScanDetails.inferenceMs} ms`, lastScanDetails.model),
+      metricCard('Image size', `${lastScanDetails.imageWidth} x ${lastScanDetails.imageHeight}`, lastScanDetails.fileName),
+      metricCard('Health score', lastScanDetails.healthScore, lastScanDetails.healthLabel)
+    ].join('');
+
+    metricsDetectionDetails.innerHTML = lastScanDetails.detections.length ? `
+      <table class="detection-table">
+        <thead>
+          <tr>
+            <th>Dish</th>
+            <th>Confidence</th>
+            <th>Box x1/y1</th>
+            <th>Box x2/y2</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${lastScanDetails.detections.map((det) => {
+            const bbox = det.bbox || [];
+            return `
+              <tr>
+                <td>${escapeHtml(cleanFoodName(det.dish))}</td>
+                <td>${escapeHtml(det.confidence)}%</td>
+                <td>${formatBoxValue(bbox[0])} / ${formatBoxValue(bbox[1])}</td>
+                <td>${formatBoxValue(bbox[2])} / ${formatBoxValue(bbox[3])}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    ` : '<div class="detection-empty">No bounding box was produced for this upload.</div>';
+  }
+
+  function renderModelMetrics(metrics) {
+    const validation = metrics.validation_metrics || {};
+    metricsModelGrid.innerHTML = [
+      metricCard('Precision', formatMetric(validation.precision), 'Validation set'),
+      metricCard('Recall', formatMetric(validation.recall), 'Validation set'),
+      metricCard('F1-score', formatMetric(validation.f1_score), 'Computed from P/R'),
+      metricCard('Detection accuracy', formatMetric(validation.map50), 'mAP50'),
+      metricCard('mAP50-95', formatMetric(validation.map50_95), 'Stricter IoU range'),
+      metricCard('Epochs', String(metrics.epochs || 'N/A'), metrics.run || '')
+    ].join('');
+
+    metricsFootnote.textContent = metrics.note || '';
+    metricsChartGrid.innerHTML = (metrics.charts || []).map((chart) => `
+      <figure class="metric-chart">
+        <img src="${escapeHtml(chart.url)}" alt="${escapeHtml(chart.label)}">
+        <figcaption>${escapeHtml(chart.label)}</figcaption>
+      </figure>
+    `).join('');
+  }
+
+  async function openMetricsModal() {
+    if (!lastScanDetails) return;
+    metricsModal.classList.add('open');
+    metricsModal.setAttribute('aria-hidden', 'false');
+    renderScanMetrics();
+    metricsModelGrid.innerHTML = metricCard('Loading', '...', 'Reading YOLO results');
+    metricsFootnote.textContent = '';
+    metricsChartGrid.innerHTML = '';
+
+    try {
+      const metrics = await getModelMetrics();
+      renderModelMetrics(metrics);
+    } catch (err) {
+      console.error('Model metrics failed:', err);
+      metricsModelGrid.innerHTML = metricCard('Metrics unavailable', 'Check backend', 'Could not read results.csv');
+    }
+  }
+
   // Renders the full conversation memory in the modal.
   function renderChatMessages(draft = '') {
     if (!nutriChatMessages) return;
@@ -662,6 +810,14 @@ document.addEventListener('DOMContentLoaded', () => {
   nutriChatModal.addEventListener('click', (event) => {
     if (event.target === nutriChatModal) {
       closeFullNutriChat();
+    }
+  });
+
+  closeMetrics.addEventListener('click', closeMetricsModal);
+
+  metricsModal.addEventListener('click', (event) => {
+    if (event.target === metricsModal) {
+      closeMetricsModal();
     }
   });
 
@@ -785,9 +941,25 @@ document.addEventListener('DOMContentLoaded', () => {
       rightColumn.classList.add('has-results');
 
       if (!data.detections || data.detections.length === 0) {
+        lastScanDetails = {
+          fileName: currentFile?.name || 'Uploaded image',
+          imageWidth: preview.naturalWidth || 0,
+          imageHeight: preview.naturalHeight || 0,
+          model: data.model || 'YOLO',
+          inferenceMs: data.inference_ms ?? 'N/A',
+          primaryDish: 'No dish detected',
+          primaryConfidence: 0,
+          healthScore: 'N/A',
+          healthLabel: 'No result',
+          detections: []
+        };
         resultsDiv.innerHTML = `
-          <div class="no-detect">No Filipino dish detected. Try a clearer photo with the full plate in view.</div>
+          <div class="no-detect">
+            <p>No Filipino dish detected. Try a clearer photo with the full plate in view.</p>
+            <button class="btn-secondary details-btn" id="openMetricsBtn" type="button">View scan details</button>
+          </div>
         `;
+        document.getElementById('openMetricsBtn').addEventListener('click', openMetricsModal);
         analyzeBtn.disabled = false;
         return;
       }
@@ -799,6 +971,18 @@ document.addEventListener('DOMContentLoaded', () => {
       const scoreNum = Number.parseInt(scoreText, 10) || 5;
       const scoreLabel = getScoreLabel(scoreNum);
       const explanation = getSimpleExplanation(dishName, advisory);
+      lastScanDetails = {
+        fileName: currentFile?.name || 'Uploaded image',
+        imageWidth: preview.naturalWidth || 0,
+        imageHeight: preview.naturalHeight || 0,
+        model: data.model || 'YOLO',
+        inferenceMs: data.inference_ms ?? 'N/A',
+        primaryDish: dishName,
+        primaryConfidence: det.confidence,
+        healthScore: scoreText,
+        healthLabel: scoreLabel,
+        detections: data.detections
+      };
       mealContext = {
         foodName: dishName,
         confidence: det.confidence,
@@ -837,7 +1021,10 @@ document.addEventListener('DOMContentLoaded', () => {
               <p class="eyebrow">Detected food</p>
               <h2>${dishName}</h2>
             </div>
-            <div class="confidence-badge">${det.confidence}% match</div>
+            <div class="result-actions">
+              <div class="confidence-badge">${det.confidence}% match</div>
+              <button class="btn-secondary details-btn" id="openMetricsBtn" type="button">View scan details</button>
+            </div>
           </div>
 
           <div class="score-row">
@@ -881,6 +1068,7 @@ document.addEventListener('DOMContentLoaded', () => {
       attachChatComposer(askCard, dishName);
       renderFollowUps(askCard.querySelector('.follow-up-row'), dishName);
       document.getElementById('openNutriChatBtn').addEventListener('click', openFullNutriChat);
+      document.getElementById('openMetricsBtn').addEventListener('click', openMetricsModal);
       typeText(document.getElementById('resultExplanation'), explanation);
 
     } catch (err) {

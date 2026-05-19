@@ -4,10 +4,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from ultralytics import YOLO
 from nlp import get_quick_advisory, stream_nutrition_reply, get_yobab_reply
+import csv
 import shutil
 import os
 import uuid
 import json
+import time
 
 app = FastAPI()
 
@@ -18,7 +20,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-model = YOLO("runs/detect/kaoncheck-4/weights/best.pt")
+MODEL_RUN_DIR = "runs/detect/kaoncheck-4"
+MODEL_WEIGHTS_PATH = f"{MODEL_RUN_DIR}/weights/best.pt"
+
+model = YOLO(MODEL_WEIGHTS_PATH)
 
 @app.post("/analyze")
 async def analyze(file: UploadFile = File(...)):
@@ -29,7 +34,9 @@ async def analyze(file: UploadFile = File(...)):
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
+        started_at = time.perf_counter()
         results = model(temp_path)
+        inference_ms = round((time.perf_counter() - started_at) * 1000, 1)
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
@@ -54,9 +61,61 @@ async def analyze(file: UploadFile = File(...)):
             })
 
     if not detections:
-        return {"message": "No dish detected", "detections": []}
+        return {
+            "message": "No dish detected",
+            "detections": [],
+            "inference_ms": inference_ms,
+            "model": "YOLOv8n",
+        }
 
-    return {"detections": detections}
+    return {
+        "detections": detections,
+        "inference_ms": inference_ms,
+        "model": "YOLOv8n",
+    }
+
+
+@app.get("/model-metrics")
+async def model_metrics():
+    metrics_path = os.path.join(MODEL_RUN_DIR, "results.csv")
+    latest = {}
+
+    if os.path.exists(metrics_path):
+        with open(metrics_path, newline="", encoding="utf-8") as csv_file:
+            rows = list(csv.DictReader(csv_file))
+            if rows:
+                latest = {key.strip(): value for key, value in rows[-1].items()}
+
+    def read_float(key, fallback=0.0):
+        try:
+            return float(latest.get(key, fallback))
+        except (TypeError, ValueError):
+            return fallback
+
+    precision = read_float("metrics/precision(B)")
+    recall = read_float("metrics/recall(B)")
+    f1_score = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
+
+    return {
+        "model": "YOLOv8n",
+        "weights": MODEL_WEIGHTS_PATH,
+        "run": "kaoncheck-4",
+        "epochs": int(read_float("epoch")),
+        "validation_metrics": {
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "f1_score": round(f1_score, 4),
+            "map50": round(read_float("metrics/mAP50(B)"), 4),
+            "map50_95": round(read_float("metrics/mAP50-95(B)"), 4),
+        },
+        "charts": [
+            {"label": "Training results", "url": "/static/runs/detect/kaoncheck-4/results.png"},
+            {"label": "F1 curve", "url": "/static/runs/detect/kaoncheck-4/BoxF1_curve.png"},
+            {"label": "Precision-recall curve", "url": "/static/runs/detect/kaoncheck-4/BoxPR_curve.png"},
+            {"label": "Confusion matrix", "url": "/static/runs/detect/kaoncheck-4/confusion_matrix.png"},
+        ],
+        "note": "Precision, recall, F1, and mAP are validation-set metrics, not per-upload scores.",
+    }
 
 
 @app.post("/advisor/stream")
