@@ -294,7 +294,7 @@ def get_yobab_reply(
         pass
     elif len(normalized.split()) > 6:
         return (
-            "I'm here for ulam and nutrition questions only. "
+            "I'm here for ulam and nutrition questions only."
             "Ask me about this meal, portions, rice, health risks, "
             "fitness goals, or healthier swaps."
         )

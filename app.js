@@ -729,7 +729,7 @@ document.addEventListener('DOMContentLoaded', () => {
       metricCard('Precision', formatMetric(validation.precision), 'Validation set'),
       metricCard('Recall', formatMetric(validation.recall), 'Validation set'),
       metricCard('F1-score', formatMetric(validation.f1_score), 'Computed from P/R'),
-      metricCard('Detection accuracy', formatMetric(validation.map50), 'mAP50'),
+      metricCard('mAP50', formatMetric(validation.map50), 'Accuracy proxy'),
       metricCard('mAP50-95', formatMetric(validation.map50_95), 'Stricter IoU range'),
       metricCard('Epochs', String(metrics.epochs || 'N/A'), metrics.run || '')
     ].join('');
