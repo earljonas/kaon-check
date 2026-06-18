@@ -62,6 +62,17 @@ Confusion matrix:
 | Dataset config | `dataset/data.yaml` |
 | Classes | 11 |
 
+## Dataset
+
+The model was trained on a Filipino food object detection dataset from Roboflow Universe:
+
+- Source: [Filipino Food Datasets by Dataset for Filipino Dishes](https://universe.roboflow.com/dataset-for-filipino-dishes/filipino-food-datasets-kd7d6)
+- Task: Object detection
+- License: CC BY 4.0
+- Classes: 11 Filipino food categories
+
+Class names in this project were normalized from the dataset labels for use in the app UI.
+
 ## Supported Classes
 
 | ID | Class |
@@ -149,3 +160,10 @@ http://127.0.0.1:8000
 - Add portion-size estimation
 - Improve mobile camera scanning
 - Add dataset version tracking
+
+## Citation
+
+Dataset source:
+
+Dataset for Filipino Dishes. "Filipino Food Datasets Dataset." Roboflow Universe, 2025.  
+https://universe.roboflow.com/dataset-for-filipino-dishes/filipino-food-datasets-kd7d6
