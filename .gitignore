@@ -23,3 +23,6 @@ train.py
 .env
 .env.*
 !.env.example
+
+# Local verification output
+.artifacts/

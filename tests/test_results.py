@@ -54,15 +54,3 @@ class ResultTests(unittest.TestCase):
                 self.assertEqual(client.get("/model-metrics").status_code, 503)
             with patch.object(main.Path, "read_text", side_effect=FileNotFoundError), self.assertLogs(main.logger):
                 self.assertEqual(client.get("/model-metrics").status_code, 503)
-
-    def test_offline_chat_is_labelled_and_partial_stream_fails(self):
-        with patch.object(nlp.OLLAMA_CLIENT, "chat", side_effect=ConnectionError):
-            with self.assertLogs(nlp.logger):
-                text = "".join(nlp.stream_nutrition_reply("Chicken Inasal", "rice", "[]"))
-        self.assertIn("Rule-based fallback", text)
-        def broken(**kwargs):
-            yield {"message": {"content": "partial"}}
-            raise ConnectionError()
-        with patch.object(nlp.OLLAMA_CLIENT, "chat", side_effect=broken), self.assertLogs(nlp.logger):
-            with self.assertRaises(ConnectionError):
-                list(nlp.stream_nutrition_reply("Chicken Inasal", "rice", "[]"))

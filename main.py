@@ -3,14 +3,14 @@ import os
 # Never install optional model dependencies while handling a request.
 os.environ["YOLO_AUTOINSTALL"] = "false"
 
-from fastapi import FastAPI, File, Form, UploadFile, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.responses import FileResponse
 from pathlib import Path
 from contextlib import asynccontextmanager
 import hashlib
 import logging
 from ultralytics import YOLO
-from nlp import get_quick_advisory, stream_nutrition_reply, get_yobab_reply, canonical_food_name
+from nlp import get_quick_advisory, canonical_food_name
 import json
 import time
 import io
@@ -64,7 +64,7 @@ app.add_middleware(RequestLimitMiddleware, max_bytes=MAX_UPLOAD_BYTES + 65536)
 def readiness():
     if model is None:
         raise HTTPException(503, "Detector unavailable; check model configuration and server logs")
-    return {"ready": True, "model": "YOLOv8n", "classes": len(model.names)}
+    return {"ready": True, "model": "YOLOv8n", "classes": len(model.names), "max_upload_bytes": MAX_UPLOAD_BYTES}
 
 @app.post("/analyze")
 def analyze(file: UploadFile = File(...)):
@@ -154,62 +154,9 @@ def model_metrics():
         raise HTTPException(503, "Verified evaluation report unavailable for this checkpoint") from None
 
 
-def validate_dish(dish):
-    try:
-        return canonical_food_name(dish)
-    except ValueError:
-        raise HTTPException(422, "Choose one of the 11 supported dishes") from None
-
-
-def validate_history(history):
-    from nlp import _parse_history
-    try:
-        return _parse_history(history)
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from None
-
-
-@app.post("/advisor/stream")
-async def advisor_stream(
-    dish: str = Form(..., min_length=1, max_length=100),
-    question: str = Form("", max_length=2000),
-    history: str = Form("", max_length=16000)
-):
-    dish = validate_dish(dish)
-    validate_history(history)
-    # Validate before sending stream headers.
-    # This one handles the real-time chat streaming
-    return StreamingResponse(
-        stream_nutrition_reply(dish, question, history),
-        media_type="text/plain; charset=utf-8",
-    )
-
-
-@app.post("/advisor/reply")
-def advisor_reply(
-    dish: str = Form(..., min_length=1, max_length=100),
-    question: str = Form("", max_length=2000),
-    history: str = Form("", max_length=16000),
-    meal_context: str = Form("", max_length=4000),
-):
-    dish = validate_dish(dish)
-    parsed_history = validate_history(history)
-    if meal_context:
-        try:
-            parsed = json.loads(meal_context)
-            if not isinstance(parsed, dict):
-                raise ValueError()
-        except (json.JSONDecodeError, ValueError, RecursionError):
-            raise HTTPException(422, "meal_context must be a JSON object") from None
-    # Client-supplied nutrition claims are not trusted as model context.
-    parsed_meal = {"food_name": dish}
-
-    reply = get_yobab_reply(question, parsed_history, parsed_meal)
-    return {"reply": reply}
-
-
 PUBLIC_FILES = {
     "app.js": BASE_DIR / "app.js",
+    "sample.jpg": BASE_DIR / "samples/daing-na-bangus.jpg",
     "styles.css": BASE_DIR / "styles.css",
     "runs/detect/kaoncheck-4/results.png": BASE_DIR / "docs/results/training-results.png",
     "runs/detect/kaoncheck-4/BoxPR_curve.png": BASE_DIR / "docs/results/precision-recall-curve.png",

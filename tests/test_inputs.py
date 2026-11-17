@@ -76,10 +76,6 @@ class InputTests(unittest.TestCase):
         self.assertNotIn("private backend", response.text)
         self.assertFalse(main.inference_lock.locked())
 
-    def test_invalid_chat_is_rejected_before_stream_headers(self):
-        for history in ('{}', 'null', '[1]', '"string"', '[{"role":"system","content":"x"}]',
-                        '[{"role":[],"content":"x"}]', '[' * 1500 + ']' * 1500):
-            for endpoint in ("/advisor/stream", "/advisor/reply"):
-                self.assertEqual(self.client.post(endpoint, data={"dish": "Boiled Rice", "history": history}).status_code, 422)
-        self.assertEqual(self.client.post("/advisor/reply", data={"dish": "Boiled Rice", "meal_context": "[]"}).status_code, 422)
-        self.assertEqual(self.client.post("/advisor/stream", data={"dish": "Boiled Rice", "question": "x" * 2001}).status_code, 422)
+    def test_removed_advisor_endpoints_are_not_available(self):
+        for endpoint in ("/advisor/stream", "/advisor/reply"):
+            self.assertEqual(self.client.post(endpoint, data={"dish": "Boiled Rice"}).status_code, 404)

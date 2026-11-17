@@ -17,10 +17,8 @@
         </span>
       </a>
 
-      <div class="header-status" aria-label="Scanner status">
-        <span class="status-dot" aria-hidden="true"></span>
-        Local scanner ready
-      </div>
+      <div class="header-status"><span id="scannerStatus" role="status">Checking scanner…</span>
+        <button id="checkReadyBtn" class="btn-secondary" type="button">Check scanner</button></div>
     </header>
 
     <main class="workspace no-results">
@@ -28,14 +26,14 @@
         <div class="scanner-copy">
           <p class="eyebrow">Meal scan</p>
           <h1 id="scanTitle">Check your Filipino meal in seconds.</h1>
-          <p id="scanSubtitle">Upload a photo or open your camera to scan your ulam.</p>
+          <p id="scanSubtitle">Upload a photo to identify supported Filipino foods.</p>
         </div>
 
         <div class="upload-zone" id="uploadZone" role="button" tabindex="0" aria-label="Upload a food photo">
           <div class="upload-glyph" aria-hidden="true"><span></span></div>
-          <h2>Drop a food photo here</h2>
-          <p>Best with clear lighting and the full plate visible.</p>
-          <input type="file" id="fileInput" accept="image/*" hidden />
+          <h2>Choose a food photo</h2>
+          <p>JPEG, PNG, or WebP. Clear lighting and a full plate work best.</p>
+          <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp" hidden />
         </div>
 
         <div class="preview-container" id="previewContainer">
@@ -46,9 +44,10 @@
           <div id="boundingBoxContainer"></div>
         </div>
 
+        <p id="scanStatus" role="status" aria-live="polite"></p>
         <div class="btn-row">
           <button class="btn-primary" id="uploadBtn" type="button">Upload photo</button>
-          <button class="btn-secondary" id="cameraBtn" type="button">Open camera</button>
+          <button class="btn-secondary" id="sampleBtn" type="button">Try sample</button>
           <button class="btn-primary is-hidden" id="analyzeBtn" type="button" disabled>Analyze dish</button>
           <button class="btn-secondary is-hidden" id="newScanBtn" type="button">New scan</button>
         </div>
@@ -63,53 +62,7 @@
     </main>
   </div>
 
-  <div class="modal" id="cameraModal" aria-hidden="true">
-    <div class="modal-inner ar-mode" role="dialog" aria-modal="true" aria-labelledby="cameraTitle">
-      <div class="camera-header">
-        <div>
-          <p class="eyebrow">Live scan</p>
-          <h3 id="cameraTitle">Camera scanner</h3>
-        </div>
-        <button class="close-icon-btn" id="closeCamera" type="button" aria-label="Close camera">X</button>
-      </div>
-
-      <div class="camera-wrapper">
-        <video id="cameraFeed" autoplay playsinline></video>
-        <div class="camera-status" id="cameraStatus">Starting camera...</div>
-        <div class="scanning-laser" id="liveScanningLaser" style="display:none;"></div>
-        <div class="scanning-overlay" id="liveScanningOverlay" style="display:none;"></div>
-        <div id="liveBoundingBoxContainer"></div>
-        <div id="liveArOverlayContainer"></div>
-      </div>
-
-      <canvas id="snapshot" hidden></canvas>
-    </div>
-  </div>
-
-  <div class="modal nutri-chat-modal" id="nutriChatModal" aria-hidden="true">
-    <div class="nutri-chat-dialog" role="dialog" aria-modal="true" aria-labelledby="nutriChatTitle">
-      <header class="nutri-chat-header">
-        <div>
-          <p class="eyebrow">Yobab</p>
-          <h3 id="nutriChatTitle">Meal chat</h3>
-        </div>
-        <button class="close-icon-btn" id="closeNutriChat" type="button" aria-label="Close Yobab chat">X</button>
-      </header>
-
-      <div class="nutri-chat-messages" id="nutriChatMessages" aria-live="polite"></div>
-
-      <div class="nutri-chat-bottom">
-        <div class="modal-follow-up-row" id="modalFollowUps"></div>
-        <form class="nutri-chat-composer" id="nutriChatForm">
-          <input id="nutriChatInput" type="text" placeholder="Ask about this meal..." autocomplete="off">
-          <button class="chat-send" type="submit">Send</button>
-        </form>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal metrics-modal" id="metricsModal" aria-hidden="true">
-    <div class="metrics-dialog" role="dialog" aria-modal="true" aria-labelledby="metricsTitle">
+  <dialog id="metricsModal" class="metrics-dialog" aria-labelledby="metricsTitle">
       <header class="metrics-header">
         <div>
           <h3 id="metricsTitle">Scan & model metrics</h3>
@@ -129,7 +82,7 @@
 
         <section>
           <div class="metrics-section-title">
-            <h4>Validation set</h4>
+            <h4>Legacy validation set</h4>
             <span class="metrics-note">Dataset-level performance</span>
           </div>
           <div class="model-metrics-grid" id="metricsModelGrid"></div>
@@ -144,8 +97,7 @@
           <div class="metrics-chart-grid" id="metricsChartGrid"></div>
         </section>
       </div>
-    </div>
-  </div>
+  </dialog>
 
   <script src="/static/app.js"></script>
 </body>
