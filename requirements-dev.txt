@@ -1,0 +1,4 @@
+-r requirements.lock
+httpx==0.28.1
+playwright==1.65.2
+ruff==0.17.5

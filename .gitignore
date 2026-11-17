@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .venv/
+.venv-*/
 venv/
 
 # YOLO / training
@@ -10,9 +11,20 @@ dataset/
 
 # Models
 *.pt
+!models/kaoncheck.pt
 
 # OS
 .DS_Store
 Thumbs.db
 
-train.py
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Local verification output
+.artifacts/
+.ruff_cache/
+tmp/
+docs/phase1/
