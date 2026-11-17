@@ -252,7 +252,7 @@ document.addEventListener('DOMContentLoaded', () => {
       liveBoundingBoxContainer.innerHTML = '';
 
       if (data.detections && data.detections.length > 0) {
-        // Just show the first thing we find to keep the screen clean
+        // Notes apply to the highest-confidence detection; boxes preserve all instances.
         const det = data.detections[0];
         lastScanDetails = {
           fileName: 'Live camera frame',
@@ -262,13 +262,12 @@ document.addEventListener('DOMContentLoaded', () => {
           inferenceMs: data.inference_ms ?? 'N/A',
           primaryDish: cleanFoodName(det.dish),
           primaryConfidence: det.confidence,
-          healthScore: det.advisory?.['Health Score'] || 'N/A',
-          healthLabel: getScoreLabel(Number.parseInt(det.advisory?.['Health Score'], 10) || 5),
+
           detections: data.detections
         };
 
         if (det.bbox) {
-          drawLiveBoundingBox(det.bbox);
+          data.detections.forEach(item => { if (item.bbox) drawLiveBoundingBox(item.bbox); });
         }
 
         if (det.dish !== currentLiveDish) {
@@ -364,14 +363,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderArFloatingCard(det) {
     const advisory = det.advisory || {};
-    const scoreText = advisory['Health Score'] || '5/10';
-    const scoreNum = Number.parseInt(scoreText, 10) || 5;
-
-    let scoreColor = '#bf3f32';
-    let scoreDesc = 'High Risk';
-    if (scoreNum >= 7) { scoreColor = '#1f7a4f'; scoreDesc = 'Healthy Choice'; }
-    else if (scoreNum >= 4) { scoreColor = '#c87913'; scoreDesc = 'Moderate'; }
-
     const card = document.createElement('div');
     card.className = 'ar-floating-card';
     card.innerHTML = `
@@ -382,22 +373,9 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
         <span class="ar-confidence">${det.confidence}%</span>
       </div>
-      <div class="ar-score-row">
-        <div class="ar-score-main">
-          <span>${scoreNum}</span><small>/10</small>
-        </div>
-        <div>
-          <div class="ar-stat-label">Health score</div>
-          <div class="ar-score-desc" style="color: ${scoreColor}">${scoreDesc}</div>
-        </div>
-      </div>
-      <div class="ar-mini-bars">
-        <div><span>Balance</span><i style="width:${Math.max(scoreNum * 10, 12)}%"></i></div>
-        <div><span>Portion watch</span><i style="width:${Math.max((10 - scoreNum) * 10, 12)}%"></i></div>
-      </div>
       <button class="ar-details-btn" type="button">View scan details</button>
       <div class="ar-details">
-        <p class="ar-thinking">Analyzing nutritional content of ${det.dish}...</p>
+        <p class="ar-thinking">Preparing general notes for ${det.dish}...</p>
         <p class="ar-ai-copy"></p>
       </div>
     `;
@@ -432,10 +410,10 @@ document.addEventListener('DOMContentLoaded', () => {
     target.textContent = '';
     target.classList.add('is-streaming');
     if (thinkingTarget) {
-      thinkingTarget.textContent = question ? `Yobab is thinking about ${dish}...` : `Analyzing nutritional content of ${dish}...`;
+      thinkingTarget.textContent = question ? `Yobab is thinking about ${dish}...` : `Preparing general notes for ${dish}...`;
       thinkingTarget.style.display = 'block';
     } else {
-      target.textContent = question ? `Yobab is thinking about ${dish}...` : `Analyzing nutritional content of ${dish}...`;
+      target.textContent = question ? `Yobab is thinking about ${dish}...` : `Preparing general notes for ${dish}...`;
     }
 
     const formData = new FormData();
@@ -690,10 +668,9 @@ document.addEventListener('DOMContentLoaded', () => {
     metricsScanSummary.innerHTML = [
       metricCard('Primary result', lastScanDetails.primaryDish),
       metricCard('Confidence', `${lastScanDetails.primaryConfidence}%`, 'This upload'),
-      metricCard('Detections', String(lastScanDetails.detections.length), 'Unique classes'),
+      metricCard('Detections', String(lastScanDetails.detections.length), 'Food instances'),
       metricCard('Inference time', `${lastScanDetails.inferenceMs} ms`, lastScanDetails.model),
       metricCard('Image size', `${lastScanDetails.imageWidth} x ${lastScanDetails.imageHeight}`, lastScanDetails.fileName),
-      metricCard('Health score', lastScanDetails.healthScore, lastScanDetails.healthLabel)
     ].join('');
 
     metricsDetectionDetails.innerHTML = lastScanDetails.detections.length ? `
@@ -729,7 +706,7 @@ document.addEventListener('DOMContentLoaded', () => {
       metricCard('Precision', formatMetric(validation.precision), 'Validation set'),
       metricCard('Recall', formatMetric(validation.recall), 'Validation set'),
       metricCard('F1-score', formatMetric(validation.f1_score), 'Computed from P/R'),
-      metricCard('mAP50', formatMetric(validation.map50), 'Accuracy proxy'),
+      metricCard('mAP50', formatMetric(validation.map50), 'Legacy validation'),
       metricCard('mAP50-95', formatMetric(validation.map50_95), 'Stricter IoU range'),
       metricCard('Epochs', String(metrics.epochs || 'N/A'), metrics.run || '')
     ].join('');
@@ -860,8 +837,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     return titleCase(
       normalized
-        .replace(/^chicken\s*-?\s*/i, '')
-        .replace(/-/g, ' ')
+                .replace(/-/g, ' ')
         .replace(/\s+/g, ' ')
         .trim()
     );
@@ -871,12 +847,6 @@ document.addEventListener('DOMContentLoaded', () => {
     return value
       .toLowerCase()
       .replace(/\b[a-z]/g, (char) => char.toUpperCase());
-  }
-
-  function getScoreLabel(scoreNum) {
-    if (scoreNum >= 7) return 'Good choice';
-    if (scoreNum >= 4) return 'Moderate';
-    return 'Limit';
   }
 
   function getSimpleExplanation(dish, advisory) {
@@ -949,8 +919,7 @@ document.addEventListener('DOMContentLoaded', () => {
           inferenceMs: data.inference_ms ?? 'N/A',
           primaryDish: 'No dish detected',
           primaryConfidence: 0,
-          healthScore: 'N/A',
-          healthLabel: 'No result',
+
           detections: []
         };
         resultsDiv.innerHTML = `
@@ -967,9 +936,6 @@ document.addEventListener('DOMContentLoaded', () => {
       const det = data.detections[0];
       const dishName = cleanFoodName(det.dish);
       const advisory = det.advisory || {};
-      const scoreText = advisory['Health Score'] || '5/10';
-      const scoreNum = Number.parseInt(scoreText, 10) || 5;
-      const scoreLabel = getScoreLabel(scoreNum);
       const explanation = getSimpleExplanation(dishName, advisory);
       lastScanDetails = {
         fileName: currentFile?.name || 'Uploaded image',
@@ -979,15 +945,13 @@ document.addEventListener('DOMContentLoaded', () => {
         inferenceMs: data.inference_ms ?? 'N/A',
         primaryDish: dishName,
         primaryConfidence: det.confidence,
-        healthScore: scoreText,
-        healthLabel: scoreLabel,
+
         detections: data.detections
       };
       mealContext = {
         foodName: dishName,
         confidence: det.confidence,
-        healthScore: scoreText,
-        healthLabel: scoreLabel,
+
         advice: {
           watch: advisory['Health Risk'] || '',
           pairWith: advisory['Recommendation'] || '',
@@ -1004,11 +968,11 @@ document.addEventListener('DOMContentLoaded', () => {
         `)
         .join('');
 
-      if (det.bbox) {
-        setTimeout(() => {
-          drawBoundingBox(det.bbox, `AI detected: ${dishName}`);
-        }, 300);
-      }
+      setTimeout(() => {
+        data.detections.forEach((item) => {
+          if (item.bbox) drawBoundingBox(item.bbox, cleanFoodName(item.dish));
+        });
+      }, 300);
       scannerCard.classList.add('has-result');
       scanTitle.textContent = 'AI detected your ulam';
       scanSubtitle.textContent = dishName;
@@ -1018,24 +982,17 @@ document.addEventListener('DOMContentLoaded', () => {
         <article class="result-card">
           <div class="result-topline">
             <div class="result-title">
-              <p class="eyebrow">Detected food</p>
+              <p class="eyebrow">Primary detection · notes apply to this dish</p>
               <h2>${dishName}</h2>
             </div>
             <div class="result-actions">
-              <div class="confidence-badge">${det.confidence}% match</div>
+              <div class="confidence-badge">${det.confidence}% model confidence</div>
               <button class="btn-secondary details-btn" id="openMetricsBtn" type="button">View scan details</button>
             </div>
           </div>
 
-          <div class="score-row">
-            <p class="eyebrow">Health score</p>
-            <div class="score-inline">
-              <div class="score-value">${scoreNum}<small>/10</small></div>
-              <span class="label-badge">${scoreLabel}</span>
-            </div>
-          </div>
-
           <p class="result-copy" id="resultExplanation"></p>
+          <ul>${data.detections.map(item => `<li>${escapeHtml(item.dish)} — ${escapeHtml(item.confidence)}% confidence</li>`).join('')}</ul>
         </article>
 
         <article class="advice-card">

@@ -1,0 +1,38 @@
+{
+  "model": "YOLOv8n",
+  "run": "kaoncheck-4",
+  "epochs": 100,
+  "checkpoint_epoch": 86,
+  "checkpoint_sha256": "df93cfc38df2865b5f56df15fb42f4c5ab4721adb306579ff776ca420973f91e",
+  "split": "legacy validation (746 images)",
+  "validation_metrics": {
+    "precision": 0.9737,
+    "recall": 0.92893,
+    "f1_score": 0.9507882678187561,
+    "map50": 0.97047,
+    "map50_95": 0.78538
+  },
+  "dataset_config_sha256": "02bab10e19291e0d020c25cca41bb79d2b20e20a458c232dae328f9f053a06bb",
+  "split_audit": {
+    "algorithm": "SHA-256 exact file bytes",
+    "cross_split_duplicate_groups": 108,
+    "validation_images_matching_train": 55,
+    "test_images_matching_train_or_validation": 53,
+    "near_duplicates_screened": false
+  },
+  "charts": [
+    {
+      "label": "Legacy training history",
+      "url": "/static/runs/detect/kaoncheck-4/results.png"
+    },
+    {
+      "label": "Legacy validation precision-recall",
+      "url": "/static/runs/detect/kaoncheck-4/BoxPR_curve.png"
+    },
+    {
+      "label": "Legacy validation confusion matrix",
+      "url": "/static/runs/detect/kaoncheck-4/confusion_matrix.png"
+    }
+  ],
+  "note": "Legacy validation figures from the served best checkpoint (epoch 86). 55 validation images exactly match training images; 53 test images overlap training/validation. Near-duplicates have not been screened. These are exploratory figures, not independent test performance or per-upload accuracy. Charts are legacy training artifacts."
+}

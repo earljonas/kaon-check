@@ -23,7 +23,6 @@ FOOD_KNOWLEDGE = {
         "risks": ["sodium from soy sauce", "fat from iga (rib) cuts"],
         "pair_with": ["gulay", "sabaw", "water", "1 cup rice"],
         "better_choice": ["chicken adobo with breast meat", "less soy sauce version"],
-        "score": 6,
         "notes": "Tasty but the rib cut is fatty. Better with less soy sauce.",
     },
     "chicken inasal": {
@@ -31,7 +30,6 @@ FOOD_KNOWLEDGE = {
         "risks": ["oil from basting", "sodium from marinade"],
         "pair_with": ["gulay", "sabaw", "water", "1 cup rice"],
         "better_choice": ["inasal with less oil basting", "remove skin before eating"],
-        "score": 7,
         "notes": "Grilled is usually a win. Just watch the basting oil.",
     },
     "fried chicken": {
@@ -39,7 +37,6 @@ FOOD_KNOWLEDGE = {
         "risks": ["oil from deep frying", "sodium", "large portions"],
         "pair_with": ["gulay", "sabaw", "water", "1 cup rice"],
         "better_choice": ["inihaw na manok", "tinola", "air-fried chicken", "chicken inasal"],
-        "score": 5,
         "notes": "The skin and breading soak up a lot of oil.",
     },
     # --- FISH ---
@@ -48,7 +45,6 @@ FOOD_KNOWLEDGE = {
         "risks": ["oil from frying", "sodium from salt curing"],
         "pair_with": ["gulay", "sabaw", "vinegar dip", "1 cup rice"],
         "better_choice": ["grilled bangus", "inihaw na bangus", "sinigang na bangus"],
-        "score": 6,
         "notes": "Bangus has good fats, but frying it in oil adds a lot of calories.",
     },
     "pan fried tilapia": {
@@ -56,7 +52,6 @@ FOOD_KNOWLEDGE = {
         "risks": ["oil from pan frying", "sodium from seasoning"],
         "pair_with": ["gulay", "sabaw", "water", "1 cup rice"],
         "better_choice": ["steamed tilapia", "sinigang na tilapia", "grilled tilapia"],
-        "score": 6,
         "notes": "Good lean protein. Better if steamed or grilled instead of fried.",
     },
     "sinaing na tulingan": {
@@ -64,7 +59,6 @@ FOOD_KNOWLEDGE = {
         "risks": ["sodium from salt", "slight bitterness if overcooked"],
         "pair_with": ["gulay", "moderate rice", "water"],
         "better_choice": ["sinaing with less salt and more kamias"],
-        "score": 7,
         "notes": "Slow-cooked and healthy. Just don't go overboard with the salt.",
     },
     # --- PORK ---
@@ -73,7 +67,6 @@ FOOD_KNOWLEDGE = {
         "risks": ["oil from frying", "sodium", "breading adds carbs and calories"],
         "pair_with": ["gulay", "sabaw", "water", "1 cup rice"],
         "better_choice": ["grilled pork chop", "baked pork chop without breading"],
-        "score": 5,
         "notes": "Breading is basically an oil sponge. Skip it if you can.",
     },
     "lechon kawali": {
@@ -81,7 +74,6 @@ FOOD_KNOWLEDGE = {
         "risks": ["saturated fat", "sodium", "cholesterol", "deep-fried pork belly"],
         "pair_with": ["atchara", "gulay", "water", "small rice"],
         "better_choice": ["grilled liempo", "inihaw na baboy", "lechon manok (roasted)"],
-        "score": 4,
         "notes": "Super heavy. Definitely a 'once in a while' treat.",
     },
     "pork bistek": {
@@ -89,7 +81,6 @@ FOOD_KNOWLEDGE = {
         "risks": ["sodium from soy sauce and calamansi marinade", "fat from pork cut"],
         "pair_with": ["gulay", "sabaw", "water", "1 cup rice"],
         "better_choice": ["bistek with leaner pork or chicken", "less soy sauce"],
-        "score": 6,
         "notes": "The soy sauce marinade is a sodium bomb. Go light on it.",
     },
     # --- RICE ---
@@ -98,7 +89,6 @@ FOOD_KNOWLEDGE = {
         "risks": ["refined carbs if white rice", "large portions spike blood sugar"],
         "pair_with": ["any ulam", "gulay", "sabaw"],
         "better_choice": ["brown rice", "half-cup portion", "cauliflower rice"],
-        "score": 6,
         "notes": "Standard fuel. Just keep the portion to around 1 cup.",
     },
     "fried rice": {
@@ -106,7 +96,6 @@ FOOD_KNOWLEDGE = {
         "risks": ["extra oil", "sodium from seasoning", "added calories vs plain rice"],
         "pair_with": ["gulay", "sabaw", "water"],
         "better_choice": ["plain boiled rice", "brown rice", "smaller fried rice portion"],
-        "score": 5,
         "notes": "Adds extra oil and salt to your carbs. Boiled rice is safer.",
     },
 }
@@ -120,7 +109,7 @@ Use simple English by default. You may use familiar Filipino food words like ula
 
 Keep answers practical and conversational, usually 2-4 sentences. Treat short follow-ups like "why?", "are you sure?", or "what about rice?" as referring to the detected meal and the previous answer.
 
-Give general nutrition guidance only. Do not diagnose, prescribe, claim exact calories from an image, or replace advice from a licensed professional. For serious medical conditions, give cautious food guidance and suggest consulting a professional.
+Do not assign numerical health ratings. Give general nutrition guidance only. Do not diagnose, prescribe, claim exact calories from an image, or replace advice from a licensed professional. For serious medical conditions, give cautious food guidance and suggest consulting a professional.
 
 For heavy, fried, or salty dishes, prefer balanced sides such as vegetables, broth-based soup, water, and modest plain rice. Avoid suggesting greasy sides for already heavy meals.
 
@@ -242,16 +231,10 @@ def build_meal_context(meal_data: dict | None) -> str:
 
     food_name = meal_data.get("food_name", "Unknown dish")
     confidence = meal_data.get("confidence", 0)
-    health_score = meal_data.get("health_score", "N/A")
-    health_label = meal_data.get("health_label", "")
 
     lines = [f"Detected food: {food_name}"]
     if confidence:
         lines.append(f"Confidence: {confidence}%")
-    if health_score:
-        lines.append(f"Health score: {health_score}")
-    if health_label:
-        lines.append(f"Health label: {health_label}")
 
     knowledge = FOOD_KNOWLEDGE.get(food_name.lower(), {})
     if knowledge:
@@ -311,7 +294,7 @@ def get_yobab_reply(
     if ai_reply:
         return ai_reply
 
-    return _fallback_reply(user_message, messages, meal_context)
+    return "[Rule-based fallback: local AI unavailable] " + _fallback_reply(user_message, messages, meal_context)
 
 
 def _fallback_reply(
@@ -350,11 +333,6 @@ def _fallback_reply(
         )
 
     if any(t in normalized for t in ("gym", "workout", "cutting", "bulking", "fitness", "muscle", "lean")):
-        if knowledge.get("score", 5) >= 7:
-            return (
-                f"{dish} is a decent choice for active people - it's good protein. "
-                "Just pair it with extra gulay for fiber."
-            )
         return (
             f"{dish} is okay occasionally, but for gym days you usually want more protein and less oil. "
             "Try a grilled version if you can."
@@ -375,11 +353,8 @@ def _fallback_reply(
         )
 
     if any(t in normalized for t in ("often", "everyday", "every day", "daily", "araw")):
-        score = knowledge.get("score", 5)
-        if score >= 7:
-            return f"{dish} is light enough to have regularly, just don't forget your veggies."
         return (
-            f"{dish} is best as an occasional treat, not an everyday thing. "
+            f"How often to eat {dish} depends on preparation, portions, and your overall diet. "
             "Balance is key."
         )
 
@@ -413,13 +388,18 @@ def call_yobab_ai(prompt_payload: list[dict]) -> str | None:
 
 def call_yobab_ai_stream(prompt_payload: list[dict]):
     """Same as above but streams the response chunk by chunk."""
+    streamed_any = False
     try:
         stream = OLLAMA_CLIENT.chat(model=MODEL_NAME, messages=prompt_payload, stream=True)
         for chunk in stream:
             content = chunk.get("message", {}).get("content", "")
             if content:
+                streamed_any = True
                 yield content
     except Exception:
+        logger.exception("Local advisor stream failed")
+        if streamed_any:
+            raise
         return
 
 
@@ -472,7 +452,7 @@ def stream_nutrition_reply(dish_name: str, question: str = "", history_json: str
         question = (
             f"Give a natural, short advisory for {dish_name}. "
             "Mention what to watch nutritionally, one practical eating tip, "
-            "a healthier way to enjoy it, and a simple health score woven into a sentence. "
+            "a preparation alternative. Do not assign a numerical health score. "
             "Use simple English with light Filipino food words."
         )
 
@@ -503,6 +483,7 @@ def stream_nutrition_reply(dish_name: str, question: str = "", history_json: str
 
     if not streamed_any:
         fallback = _fallback_reply(question, history, meal_context)
+        yield "[Rule-based fallback: local AI unavailable] "
         for word in fallback.split(" "):
             yield word + " "
 
@@ -513,54 +494,35 @@ def _parse_history(history_json: str) -> list[dict]:
         return []
     try:
         raw = json.loads(history_json)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError):
         raise ValueError("history must be valid JSON") from None
     if not isinstance(raw, list) or len(raw) > MAX_HISTORY_MESSAGES:
         raise ValueError("history must be a list of at most 10 messages")
     for item in raw:
-        if (not isinstance(item, dict) or item.get("role") not in {"user", "assistant"}
+        if (not isinstance(item, dict) or item.get("role") not in ("user", "assistant")
                 or not isinstance(item.get("content"), str)
                 or not 1 <= len(item["content"]) <= 1200):
             raise ValueError("history messages require a user/assistant role and 1-1200 character content")
     return raw
 
 
-# Old functions kept so the /analyze endpoint doesn't break
-HIGH_RISK_TERMS = ("lechon", "kawali", "sisig", "chicharon", "longganisa", "tocino", "fried")
-MODERATE_TERMS = ("rice", "pancit", "adobo", "caldereta", "menudo", "lumpia")
-BETTER_TERMS = ("fish", "bangus", "tinola", "sinigang", "vegetable", "pinakbet", "monggo")
+def canonical_food_name(label: str) -> str:
+    """Map the dataset's category-wrapped labels to one supported dish identity."""
+    match = re.search(r"-\s*([^-]+?)\s*-", label)
+    name = (match.group(1) if match else label).strip()
+    for known in FOOD_KNOWLEDGE:
+        if name.casefold() == known.casefold():
+            return known.title()
+    raise ValueError("Unsupported dish")
+
 
 def get_quick_advisory(dish_name: str) -> dict:
-    """Basic rule-based logic for a fast response."""
-    dish = dish_name.lower()
-    if any(term in dish for term in HIGH_RISK_TERMS):
-        return {
-            "Nutritional Profile": f"{dish_name} is satisfying but can be higher in fat, sodium, or calories.",
-            "Health Risk": "Large or frequent servings can affect blood pressure, cholesterol, and weight.",
-            "Recommendation": "Keep the serving modest and balance with gulay, sabaw, water, and moderate rice.",
-            "Healthier Alternative": "Try grilled, baked, air-fried, or less oily version with more vegetables.",
-            "Health Score": "5/10",
-        }
-    if any(term in dish for term in BETTER_TERMS):
-        return {
-            "Nutritional Profile": f"{dish_name} provides protein and nutrients, especially with vegetables or sabaw.",
-            "Health Risk": "Watch added salt, oily preparation, or too much rice on the side.",
-            "Recommendation": "A good choice when portion is balanced and salt is controlled.",
-            "Healthier Alternative": "Use less salt, add more vegetables, and choose steamed or broth-based preparation.",
-            "Health Score": "7/10",
-        }
-    if any(term in dish for term in MODERATE_TERMS):
-        return {
-            "Nutritional Profile": f"{dish_name} is filling and energy-dense - depends on ingredients and cooking.",
-            "Health Risk": "Too much sauce, fatty meat, or large rice portion can make it heavier than it looks.",
-            "Recommendation": "Balance with lean protein, vegetables, and mindful rice portion.",
-            "Healthier Alternative": "Choose brown rice, leaner protein, extra vegetables, or a smaller serving.",
-            "Health Score": "6/10",
-        }
+    name = canonical_food_name(dish_name)
+    knowledge = FOOD_KNOWLEDGE[name.lower()]
     return {
-        "Nutritional Profile": "This dish can fit a balanced diet depending on preparation and portion size.",
-        "Health Risk": "Main concern is frequency, portion, and salt/sugar/oil content.",
-        "Recommendation": "Balance with vegetables, water, and a sensible portion of rice.",
-        "Healthier Alternative": "Choose grilled, steamed, broth-based, or vegetable-rich versions.",
-        "Health Score": "6/10",
+        "Nutritional Profile": "General preparation notes based on the dish label; ingredients, portions, and nutrients are not measured from the image.",
+        "Health Risk": ", ".join(knowledge["risks"]),
+        "Recommendation": ", ".join(knowledge["pair_with"]),
+        "Healthier Alternative": ", ".join(knowledge["better_choice"]),
+        "basis": "Rule-based preparation notes; not a clinical assessment",
     }

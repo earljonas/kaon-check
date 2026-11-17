@@ -10,14 +10,13 @@ from contextlib import asynccontextmanager
 import hashlib
 import logging
 from ultralytics import YOLO
-from nlp import get_quick_advisory, stream_nutrition_reply, get_yobab_reply
-import csv
+from nlp import get_quick_advisory, stream_nutrition_reply, get_yobab_reply, canonical_food_name
 import json
 import time
 import io
 import warnings
 from threading import Lock
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 from request_limits import RequestLimitMiddleware
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -88,7 +87,7 @@ def analyze(file: UploadFile = File(...)):
                 if source.width * source.height > MAX_IMAGE_PIXELS:
                     raise HTTPException(413, "Image exceeds the pixel limit")
                 source.load()
-                image = source.convert("RGB")
+                image = ImageOps.exif_transpose(source).convert("RGB")
     except (Image.DecompressionBombError, Image.DecompressionBombWarning):
         raise HTTPException(413, "Image exceeds the decoder safety limit") from None
     except (UnidentifiedImageError, OSError, ValueError):
@@ -109,24 +108,24 @@ def analyze(file: UploadFile = File(...)):
         image.close()
 
     detections = []
-    seen = set()
     for result in results:
         for box in result.boxes:
             class_id = int(box.cls[0])
-            dish_name = model.names[class_id]
-            if dish_name in seen:
-                continue
-            seen.add(dish_name)
+            dish_name = canonical_food_name(model.names[class_id])
             confidence = float(box.conf[0])
             bbox = box.xyxyn[0].tolist()
             advisory = get_quick_advisory(dish_name)
             detections.append({
                 "dish": dish_name,
+                "dish_id": dish_name.lower().replace(" ", "_"),
+                "class_id": class_id,
+                "detection_id": len(detections),
                 "confidence": round(confidence * 100, 1),
                 "bbox": bbox,
                 "advisory": advisory
             })
 
+    detections.sort(key=lambda item: item["confidence"], reverse=True)
     if not detections:
         return {
             "message": "No dish detected",
@@ -143,46 +142,23 @@ def analyze(file: UploadFile = File(...)):
 
 
 @app.get("/model-metrics")
-async def model_metrics():
-    metrics_path = os.path.join(MODEL_RUN_DIR, "results.csv")
-    latest = {}
+def model_metrics():
+    try:
+        report = json.loads((BASE_DIR / "docs/model-evaluation.json").read_text(encoding="utf-8"))
+        actual_hash = hashlib.sha256(MODEL_WEIGHTS_PATH.read_bytes()).hexdigest()
+        if report["checkpoint_sha256"] != actual_hash:
+            raise ValueError("Evaluation checkpoint mismatch")
+        return report
+    except (OSError, ValueError, KeyError):
+        logger.exception("Evaluation report unavailable or checkpoint mismatch")
+        raise HTTPException(503, "Verified evaluation report unavailable for this checkpoint") from None
 
-    if os.path.exists(metrics_path):
-        with open(metrics_path, newline="", encoding="utf-8") as csv_file:
-            rows = list(csv.DictReader(csv_file))
-            if rows:
-                latest = {key.strip(): value for key, value in rows[-1].items()}
 
-    def read_float(key, fallback=0.0):
-        try:
-            return float(latest.get(key, fallback))
-        except (TypeError, ValueError):
-            return fallback
-
-    precision = read_float("metrics/precision(B)")
-    recall = read_float("metrics/recall(B)")
-    f1_score = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
-
-    return {
-        "model": "YOLOv8n",
-        "weights": MODEL_WEIGHTS_PATH,
-        "run": "kaoncheck-4",
-        "epochs": int(read_float("epoch")),
-        "validation_metrics": {
-            "precision": round(precision, 4),
-            "recall": round(recall, 4),
-            "f1_score": round(f1_score, 4),
-            "map50": round(read_float("metrics/mAP50(B)"), 4),
-            "map50_95": round(read_float("metrics/mAP50-95(B)"), 4),
-        },
-        "charts": [
-            {"label": "Training results", "url": "/static/runs/detect/kaoncheck-4/results.png"},
-            {"label": "F1 curve", "url": "/static/runs/detect/kaoncheck-4/BoxF1_curve.png"},
-            {"label": "Precision-recall curve", "url": "/static/runs/detect/kaoncheck-4/BoxPR_curve.png"},
-            {"label": "Confusion matrix", "url": "/static/runs/detect/kaoncheck-4/confusion_matrix.png"},
-        ],
-        "note": "Precision, recall, F1, and mAP are validation-set metrics, not per-upload scores.",
-    }
+def validate_dish(dish):
+    try:
+        return canonical_food_name(dish)
+    except ValueError:
+        raise HTTPException(422, "Choose one of the 11 supported dishes") from None
 
 
 def validate_history(history):
@@ -199,6 +175,7 @@ async def advisor_stream(
     question: str = Form("", max_length=2000),
     history: str = Form("", max_length=16000)
 ):
+    dish = validate_dish(dish)
     validate_history(history)
     # Validate before sending stream headers.
     # This one handles the real-time chat streaming
@@ -215,13 +192,14 @@ def advisor_reply(
     history: str = Form("", max_length=16000),
     meal_context: str = Form("", max_length=4000),
 ):
+    dish = validate_dish(dish)
     parsed_history = validate_history(history)
     if meal_context:
         try:
             parsed = json.loads(meal_context)
             if not isinstance(parsed, dict):
                 raise ValueError()
-        except (json.JSONDecodeError, ValueError):
+        except (json.JSONDecodeError, ValueError, RecursionError):
             raise HTTPException(422, "meal_context must be a JSON object") from None
     # Client-supplied nutrition claims are not trusted as model context.
     parsed_meal = {"food_name": dish}

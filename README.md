@@ -9,7 +9,7 @@ The project includes a FastAPI backend, a browser UI, YOLO training artifacts, a
 - Computer vision model integration with FastAPI
 - Image upload and live camera scanning
 - Bounding box rendering in the browser
-- Per-scan confidence, inference time, and detection details
+- Per-scan model confidence, inference time, and instance-level detection details
 - Validation metrics from the trained YOLO run
 - Local LLM integration for nutrition questions
 - Clear separation between prediction results and model evaluation metrics
@@ -57,7 +57,7 @@ Confusion matrix:
 |---|---|
 | Model | YOLOv8n |
 | Task | Object detection |
-| Weights | `runs/detect/kaoncheck-4/weights/best.pt` |
+| Weights | `models/kaoncheck.pt` |
 | Training run | `runs/detect/kaoncheck-4` |
 | Dataset config | `dataset/data.yaml` |
 | Classes | 11 |
@@ -91,15 +91,15 @@ Class names in this project were normalized from the dataset labels for use in t
 
 ## Model Performance
 
-Metrics are from `runs/detect/kaoncheck-4/results.csv`.
+Metrics come from the bundled best checkpoint (epoch 86), recorded with its SHA-256 in `docs/model-evaluation.json`. These are legacy validation results, **not independent test performance**. Exact-byte auditing found 55 validation images matching training images and 53 test images matching training/validation. Near-duplicates have not been screened. The model has not been retrained on corrected splits.
 
 | Metric | Score |
 |---|---:|
-| Precision | 97.46% |
-| Recall | 93.41% |
-| F1-score | 95.39% |
-| mAP50 | 97.21% |
-| mAP50-95 | 78.26% |
+| Precision | 97.37% |
+| Recall | 92.89% |
+| F1-score | 95.08% |
+| mAP50 | 97.05% |
+| mAP50-95 | 78.54% |
 
 Per-upload confidence is the model score for one prediction. Precision, recall, F1-score, and mAP are validation-set metrics across the trained dataset.
 
@@ -175,3 +175,10 @@ Dataset source:
 
 Dataset for Filipino Dishes. "Filipino Food Datasets Dataset." Roboflow Universe, 2025.  
 https://universe.roboflow.com/dataset-for-filipino-dishes/filipino-food-datasets-kd7d6
+
+## Verification
+
+Install `requirements-dev.txt`, then run `python -m unittest discover -s tests -v`.
+JavaScript syntax: `node --check app.js`. There is no frontend build step.
+
+Preparation notes are rule-based and unvalidated; no numerical health ratings or image-derived nutrients are produced. Confidence is a model score, not a calibrated probability of correctness.

@@ -57,6 +57,15 @@ class InputTests(unittest.TestCase):
         self.assertEqual(self.upload(image_bytes(), "paths.txt").status_code, 200)
         self.assertIsInstance(self.detector.call_args.args[0], Image.Image)
 
+    def test_exif_orientation_matches_browser_preview(self):
+        out = io.BytesIO()
+        image = Image.new("RGB", (32, 16))
+        exif = Image.Exif()
+        exif[274] = 6
+        image.save(out, "JPEG", exif=exif)
+        self.assertEqual(self.upload(out.getvalue()).status_code, 200)
+        self.assertEqual(self.detector.call_args.args[0].size, (16, 32))
+
     def test_busy_and_inference_failure(self):
         with main.inference_lock:
             self.assertEqual(self.upload(image_bytes()).status_code, 429)
@@ -68,8 +77,9 @@ class InputTests(unittest.TestCase):
         self.assertFalse(main.inference_lock.locked())
 
     def test_invalid_chat_is_rejected_before_stream_headers(self):
-        for history in ('{}', 'null', '[1]', '"string"', '[{"role":"system","content":"x"}]'):
+        for history in ('{}', 'null', '[1]', '"string"', '[{"role":"system","content":"x"}]',
+                        '[{"role":[],"content":"x"}]', '[' * 1500 + ']' * 1500):
             for endpoint in ("/advisor/stream", "/advisor/reply"):
-                self.assertEqual(self.client.post(endpoint, data={"dish": "rice", "history": history}).status_code, 422)
-        self.assertEqual(self.client.post("/advisor/reply", data={"dish": "rice", "meal_context": "[]"}).status_code, 422)
-        self.assertEqual(self.client.post("/advisor/stream", data={"dish": "rice", "question": "x" * 2001}).status_code, 422)
+                self.assertEqual(self.client.post(endpoint, data={"dish": "Boiled Rice", "history": history}).status_code, 422)
+        self.assertEqual(self.client.post("/advisor/reply", data={"dish": "Boiled Rice", "meal_context": "[]"}).status_code, 422)
+        self.assertEqual(self.client.post("/advisor/stream", data={"dish": "Boiled Rice", "question": "x" * 2001}).status_code, 422)
