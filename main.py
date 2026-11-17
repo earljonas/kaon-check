@@ -1,7 +1,6 @@
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
+from pathlib import Path
 from ultralytics import YOLO
 from nlp import get_quick_advisory, stream_nutrition_reply, get_yobab_reply
 import csv
@@ -13,12 +12,7 @@ import time
 
 app = FastAPI()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+BASE_DIR = Path(__file__).resolve().parent
 
 MODEL_RUN_DIR = "runs/detect/kaoncheck-4"
 MODEL_WEIGHTS_PATH = f"{MODEL_RUN_DIR}/weights/best.pt"
@@ -161,8 +155,22 @@ async def advisor_reply(
     return {"reply": reply}
 
 
-app.mount("/static", StaticFiles(directory="."), name="static")
+PUBLIC_FILES = {
+    "app.js": BASE_DIR / "app.js",
+    "styles.css": BASE_DIR / "styles.css",
+    "runs/detect/kaoncheck-4/results.png": BASE_DIR / "docs/results/training-results.png",
+    "runs/detect/kaoncheck-4/BoxPR_curve.png": BASE_DIR / "docs/results/precision-recall-curve.png",
+    "runs/detect/kaoncheck-4/confusion_matrix.png": BASE_DIR / "docs/results/confusion-matrix.png",
+}
+
+
+@app.get("/static/{path:path}")
+def public_file(path: str):
+    target = PUBLIC_FILES.get(path)
+    if target is None or not target.is_file():
+        raise HTTPException(404, "Asset not found")
+    return FileResponse(target)
 
 @app.get("/")
 async def read_index():
-    return FileResponse('index.html')
+    return FileResponse(BASE_DIR / 'index.html')
