@@ -1,6 +1,9 @@
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from pathlib import Path
+from contextlib import asynccontextmanager
+import hashlib
+import logging
 from ultralytics import YOLO
 from nlp import get_quick_advisory, stream_nutrition_reply, get_yobab_reply
 import csv
@@ -10,17 +13,50 @@ import uuid
 import json
 import time
 
-app = FastAPI()
-
 BASE_DIR = Path(__file__).resolve().parent
+MODEL_RUN_DIR = BASE_DIR / "runs/detect/kaoncheck-4"
+MODEL_WEIGHTS_PATH = Path(os.getenv("KAONCHECK_MODEL_PATH", "models/kaoncheck.pt"))
+if not MODEL_WEIGHTS_PATH.is_absolute():
+    MODEL_WEIGHTS_PATH = BASE_DIR / MODEL_WEIGHTS_PATH
+model = None
+logger = logging.getLogger(__name__)
 
-MODEL_RUN_DIR = "runs/detect/kaoncheck-4"
-MODEL_WEIGHTS_PATH = f"{MODEL_RUN_DIR}/weights/best.pt"
 
-model = YOLO(MODEL_WEIGHTS_PATH)
+def load_detector():
+    if not MODEL_WEIGHTS_PATH.is_file():
+        raise FileNotFoundError("Model checkpoint missing")
+    if MODEL_WEIGHTS_PATH == BASE_DIR / "models/kaoncheck.pt":
+        expected = (BASE_DIR / "models/kaoncheck.sha256").read_text().split()[0]
+        if hashlib.sha256(MODEL_WEIGHTS_PATH.read_bytes()).hexdigest() != expected:
+            raise ValueError("Model checkpoint checksum mismatch")
+    return YOLO(str(MODEL_WEIGHTS_PATH))
+
+
+@asynccontextmanager
+async def lifespan(app):
+    global model
+    try:
+        model = load_detector()
+    except Exception:
+        model = None
+        logger.exception("Detector initialization failed")
+    yield
+    model = None
+
+
+app = FastAPI(lifespan=lifespan)
+
+
+@app.get("/health/ready")
+def readiness():
+    if model is None:
+        raise HTTPException(503, "Detector unavailable; check model configuration and server logs")
+    return {"ready": True, "model": "YOLOv8n", "classes": len(model.names)}
 
 @app.post("/analyze")
 async def analyze(file: UploadFile = File(...)):
+    if model is None:
+        raise HTTPException(503, "Detector unavailable; check /health/ready")
     _, ext = os.path.splitext(file.filename or "")
     temp_path = f"temp_{uuid.uuid4().hex}{ext or '.jpg'}"
 

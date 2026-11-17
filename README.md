@@ -123,10 +123,18 @@ Optional Yobab nutrition chat through /advisor/stream
 
 ## Setup
 
+Use Python 3.12. The demo checkpoint is included in `models/` and verified
+against its SHA-256 on startup; the dataset is not required for inference.
+Run commands from the repository root. Runtime paths resolve relative to the
+application, so a different working directory does not change model lookup.
+Optional configuration is documented in `.env.example`; to load a local copy,
+add `--env-file .env` to the uvicorn command. No API keys are required.
+`GET /health/ready` returns 200 when the detector loads and 503 otherwise.
+
 Install dependencies:
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.lock
 ```
 
 Install the local chat model:
