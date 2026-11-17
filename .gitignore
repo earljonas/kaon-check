@@ -26,3 +26,5 @@ Thumbs.db
 # Local verification output
 .artifacts/
 .ruff_cache/
+tmp/
+docs/phase1/
