@@ -60,16 +60,11 @@ h11==0.16.0
     #   httpcore
     #   uvicorn
 httpcore==1.0.9
-    # via
-    #   -r requirements.lock
-    #   httpx
+    # via httpx
 httptools==0.9.0
     # via -r requirements.lock
 httpx==0.28.1
-    # via
-    #   -r requirements-dev.txt
-    #   -r requirements.lock
-    #   ollama
+    # via -r requirements-dev.txt
 idna==3.20
     # via
     #   -r requirements.lock
@@ -110,8 +105,6 @@ numpy==2.5.5
     #   torchvision
     #   ultralytics
     #   ultralytics-thop
-ollama==0.6.1
-    # via -r requirements.lock
 opencv-python==5.0.0.93
     # via
     #   -r requirements.lock
@@ -144,7 +137,6 @@ pydantic==2.14.3
     # via
     #   -r requirements.lock
     #   fastapi
-    #   ollama
 pydantic-core==2.50.4
     # via
     #   -r requirements.lock

@@ -29,6 +29,6 @@ class StartupTests(unittest.TestCase):
                     self.assertEqual(client.post("/analyze", files={"file": ("x.jpg", b"x")}).status_code, 503)
 
     def test_corrupt_bundle_is_rejected(self):
-        with patch.object(main.Path, "read_bytes", return_value=b"not the checkpoint"):
+        with patch("pathlib.Path.read_bytes", return_value=b"not the checkpoint"):
             with self.assertRaisesRegex(ValueError, "checksum"):
                 main.load_detector()

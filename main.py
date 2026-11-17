@@ -1,36 +1,24 @@
+"""FastAPI routes for the local, upload-only food detector."""
+from contextlib import asynccontextmanager
+import hashlib
+import io
+import json
+import logging
 import os
-
-# Never install optional model dependencies while handling a request.
-os.environ["YOLO_AUTOINSTALL"] = "false"
+from threading import Lock
+import time
+import warnings
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import FileResponse
-from pathlib import Path
-from contextlib import asynccontextmanager
-import hashlib
-import logging
-from ultralytics import YOLO
-from nlp import get_quick_advisory, canonical_food_name
-import json
-import time
-import io
-import warnings
-from threading import Lock
 from PIL import Image, ImageOps, UnidentifiedImageError
-from request_limits import RequestLimitMiddleware
 
-BASE_DIR = Path(__file__).resolve().parent
-MODEL_RUN_DIR = BASE_DIR / "runs/detect/kaoncheck-4"
-MODEL_WEIGHTS_PATH = Path(os.getenv("KAONCHECK_MODEL_PATH", "models/kaoncheck.pt"))
-if not MODEL_WEIGHTS_PATH.is_absolute():
-    MODEL_WEIGHTS_PATH = BASE_DIR / MODEL_WEIGHTS_PATH
+from dishes import DISHES, preparation_notes, canonical_food_name
+from request_limits import RequestLimitMiddleware
+from settings import BASE_DIR, MODEL_WEIGHTS_PATH, MAX_UPLOAD_BYTES, MAX_IMAGE_PIXELS, CONFIDENCE
+
 model = None
 logger = logging.getLogger(__name__)
-MAX_UPLOAD_BYTES = int(os.getenv("KAONCHECK_MAX_UPLOAD_BYTES", "10485760"))
-MAX_IMAGE_PIXELS = int(os.getenv("KAONCHECK_MAX_IMAGE_PIXELS", "20000000"))
-CONFIDENCE = float(os.getenv("KAONCHECK_CONFIDENCE", "0.25"))
-if MAX_UPLOAD_BYTES <= 0 or MAX_IMAGE_PIXELS <= 0 or not 0 < CONFIDENCE <= 1:
-    raise ValueError("Invalid upload, image, or confidence configuration")
 inference_lock = Lock()
 
 
@@ -41,7 +29,14 @@ def load_detector():
         expected = (BASE_DIR / "models/kaoncheck.sha256").read_text().split()[0]
         if hashlib.sha256(MODEL_WEIGHTS_PATH.read_bytes()).hexdigest() != expected:
             raise ValueError("Model checkpoint checksum mismatch")
-    return YOLO(str(MODEL_WEIGHTS_PATH))
+    # Ultralytics reads this on import; serving must never install optional packages.
+    os.environ["YOLO_AUTOINSTALL"] = "false"
+    from ultralytics import YOLO
+    detector = YOLO(str(MODEL_WEIGHTS_PATH))
+    names = {canonical_food_name(name).lower() for name in detector.names.values()}
+    if names != set(DISHES) or len(detector.names) != len(DISHES):
+        raise ValueError("Checkpoint must contain the 11 supported food classes")
+    return detector
 
 
 @asynccontextmanager
@@ -114,7 +109,7 @@ def analyze(file: UploadFile = File(...)):
             dish_name = canonical_food_name(model.names[class_id])
             confidence = float(box.conf[0])
             bbox = box.xyxyn[0].tolist()
-            advisory = get_quick_advisory(dish_name)
+            advisory = preparation_notes(dish_name)
             detections.append({
                 "dish": dish_name,
                 "dish_id": dish_name.lower().replace(" ", "_"),

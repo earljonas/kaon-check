@@ -4,7 +4,7 @@ from unittest.mock import patch, Mock
 
 from fastapi.testclient import TestClient
 import main
-import nlp
+import dishes
 from test_inputs import image_bytes
 
 
@@ -33,8 +33,8 @@ class ResultTests(unittest.TestCase):
                  "Lechon Kawali", "Pork Bistek", "Boiled Rice", "Fried Rice"]
         for name in names:
             with self.subTest(name=name):
-                self.assertEqual(nlp.get_quick_advisory(name), nlp.get_quick_advisory(f"Category -{name}-"))
-                self.assertNotIn("score", nlp.FOOD_KNOWLEDGE[name.lower()])
+                self.assertEqual(dishes.preparation_notes(name), dishes.preparation_notes(f"Category -{name}-"))
+                self.assertNotIn("score", dishes.DISHES[name.lower()])
 
     def test_report_matches_checkpoint_and_discloses_leakage(self):
         with patch.object(main, "load_detector", return_value=SimpleNamespace(names={})), TestClient(main.app) as client:
@@ -48,7 +48,7 @@ class ResultTests(unittest.TestCase):
 
     def test_missing_or_mismatched_report_is_unavailable_not_zero(self):
         with patch.object(main, "load_detector", return_value=SimpleNamespace(names={})), TestClient(main.app) as client:
-            with patch.object(main.Path, "read_bytes", return_value=b"other checkpoint"), self.assertLogs(main.logger):
+            with patch("pathlib.Path.read_bytes", return_value=b"other checkpoint"), self.assertLogs(main.logger):
                 self.assertEqual(client.get("/model-metrics").status_code, 503)
-            with patch.object(main.Path, "read_text", side_effect=FileNotFoundError), self.assertLogs(main.logger):
+            with patch("pathlib.Path.read_text", side_effect=FileNotFoundError), self.assertLogs(main.logger):
                 self.assertEqual(client.get("/model-metrics").status_code, 503)
