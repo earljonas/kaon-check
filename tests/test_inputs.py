@@ -1,6 +1,5 @@
 import io
 import unittest
-from types import SimpleNamespace
 from unittest.mock import patch, Mock
 
 from fastapi.testclient import TestClient
