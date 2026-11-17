@@ -6,6 +6,10 @@ Handles detection intent, tracking conversation history, and talking to the AI.
 import json
 import re
 import ollama
+import logging
+
+logger = logging.getLogger(__name__)
+OLLAMA_CLIENT = ollama.Client(timeout=30)
 
 # Just keeping track of how much history to send to the model
 MODEL_NAME = "llama3.1"
@@ -400,16 +404,17 @@ def _fallback_reply(
 def call_yobab_ai(prompt_payload: list[dict]) -> str | None:
     """Talks to the actual AI model (Ollama)."""
     try:
-        response = ollama.chat(model=MODEL_NAME, messages=prompt_payload)
+        response = OLLAMA_CLIENT.chat(model=MODEL_NAME, messages=prompt_payload)
         return response["message"]["content"].strip()
     except Exception:
+        logger.exception("Local advisor unavailable; using rule-based notes")
         return None
 
 
 def call_yobab_ai_stream(prompt_payload: list[dict]):
     """Same as above but streams the response chunk by chunk."""
     try:
-        stream = ollama.chat(model=MODEL_NAME, messages=prompt_payload, stream=True)
+        stream = OLLAMA_CLIENT.chat(model=MODEL_NAME, messages=prompt_payload, stream=True)
         for chunk in stream:
             content = chunk.get("message", {}).get("content", "")
             if content:
@@ -503,20 +508,21 @@ def stream_nutrition_reply(dish_name: str, question: str = "", history_json: str
 
 
 def _parse_history(history_json: str) -> list[dict]:
-    """Helper to turn the JSON history into a Python list."""
+    """Validate client history before creating prompts or stream responses."""
     if not history_json:
         return []
     try:
         raw = json.loads(history_json)
     except json.JSONDecodeError:
-        return []
-    parsed = []
-    for item in raw[-MAX_HISTORY_MESSAGES:]:
-        role = item.get("role")
-        content = str(item.get("content", "")).strip()
-        if role in ("user", "assistant") and content:
-            parsed.append({"role": role, "content": content[:1200]})
-    return parsed
+        raise ValueError("history must be valid JSON") from None
+    if not isinstance(raw, list) or len(raw) > MAX_HISTORY_MESSAGES:
+        raise ValueError("history must be a list of at most 10 messages")
+    for item in raw:
+        if (not isinstance(item, dict) or item.get("role") not in {"user", "assistant"}
+                or not isinstance(item.get("content"), str)
+                or not 1 <= len(item["content"]) <= 1200):
+            raise ValueError("history messages require a user/assistant role and 1-1200 character content")
+    return raw
 
 
 # Old functions kept so the /analyze endpoint doesn't break

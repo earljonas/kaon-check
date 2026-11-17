@@ -441,7 +441,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const formData = new FormData();
     formData.append('dish', dish);
     formData.append('question', question);
-    formData.append('history', JSON.stringify(history));
+    formData.append('history', JSON.stringify(history.slice(-10).map(({role, content}) => ({role, content: content.slice(0, 1200)}))));
 
     try {
       const res = await fetch(`${apiBaseUrl}/advisor/stream`, { method: 'POST', body: formData });
@@ -554,7 +554,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const formData = new FormData();
       formData.append('dish', mealContext.foodName);
       formData.append('question', userMessage);
-      formData.append('history', JSON.stringify(historyBeforeUserMessage));
+      formData.append('history', JSON.stringify(historyBeforeUserMessage.slice(-10).map(({role, content}) => ({role, content: content.slice(0, 1200)}))));
 
       const res = await fetch(`${apiBaseUrl}/advisor/stream`, { method: 'POST', body: formData });
       if (!res.ok || !res.body) throw new Error(`Advisor stream failed: ${res.status}`);
